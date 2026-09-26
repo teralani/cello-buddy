@@ -1,4 +1,4 @@
-import { detectPitchNsdf, rmsOf, toDecibels } from "@/lib/audioPitch";
+import { detectPitchNsdf, PitchSmoother, rmsOf, toDecibels } from "@/lib/audioPitch";
 import type { MeasureMetrics, PracticeMetrics } from "@/lib/metrics";
 import { DYNAMIC_MARKS, midiToName, type DynamicMark, type ScoreNote, type ScoreTimeline } from "@/lib/scoreTimeline";
 
@@ -13,6 +13,12 @@ export type PracticeSettings = {
   timingToleranceMs: number;
   /* How far the played pitch may sit from the written pitch. */
   pitchToleranceCents: number;
+  /* Minimum periodicity (0..1) for a frame to count as pitched. Bowed
+     strings sit lower than a voice. */
+  pitchClarity: number;
+  /* Grade the note name only, so an octave slip in detection (common on
+     the low strings) does not count as a wrong note. */
+  ignoreOctave: boolean;
   /* How many dynamic levels off (p vs mp = 1) still count as right. */
   dynamicToleranceSteps: number;
   /* Loudness distance between neighbouring dynamic levels. */
@@ -34,12 +40,14 @@ export type PracticeSettings = {
 export const defaultSettings: PracticeSettings = {
   bpm: 72,
   timingToleranceMs: 120,
-  pitchToleranceCents: 35,
+  pitchToleranceCents: 50,
+  pitchClarity: 0.6,
+  ignoreOctave: true,
   dynamicToleranceSteps: 1,
   dynamicStepDb: 6,
   mfReferenceDb: -26,
   attackThresholdDb: 6,
-  silenceDb: -50,
+  silenceDb: -60,
   latencyMs: 40,
   countInMeasures: 1,
   clickDuringPlay: false,
@@ -94,6 +102,8 @@ export type EngineState = {
   phase: Phase;
   /* Beats left in the count-in, counting down to 1. */
   countdownBeat: number;
+  /* Total beats in the count-in (one measure's worth per count-in measure). */
+  countInBeats: number;
   elapsedSeconds: number;
   currentNoteIndex: number;
   currentStep: number;
@@ -121,6 +131,7 @@ export function initialState(timeline: ScoreTimeline | null): EngineState {
   return {
     phase: "idle",
     countdownBeat: 0,
+    countInBeats: 0,
     elapsedSeconds: 0,
     currentNoteIndex: -1,
     currentStep: -1,
@@ -165,6 +176,7 @@ export class PracticeEngine {
   private candidateSince = 0;
   private lastAttackAt = -1;
   private wasSilent = true;
+  private readonly smoother = new PitchSmoother(5);
   private gradedUpTo = 0;
   private notePointer = 0;
   private stepPointer = 0;
@@ -216,14 +228,16 @@ export class PracticeEngine {
     this.analyser = analyser;
     this.buffer = new Float32Array(analyser.fftSize);
 
-    const countInBeats = this.settings.countInMeasures * this.timeline.beatsPerMeasure;
-    const countStart = context.currentTime + 0.15;
+    /* The count-in is a whole measure per count-in measure, one click per
+       beat of the time signature, on the same grid the score then follows. */
+    const countInBeats = Math.max(1, this.settings.countInMeasures) * this.timeline.beatsPerMeasure;
+    const countStart = context.currentTime + 0.05;
     this.startTime = countStart + countInBeats * this.beatSeconds;
     for (let beat = 0; beat < countInBeats; beat += 1) {
       this.click(countStart + beat * this.beatSeconds, beat % this.timeline.beatsPerMeasure === 0);
     }
     this.nextClickBeat = 0;
-    this.emit({ phase: "countdown", countdownBeat: countInBeats });
+    this.emit({ phase: "countdown", countdownBeat: countInBeats, countInBeats });
     this.timer = window.setInterval(() => this.tick(), 25);
   }
 
@@ -288,24 +302,33 @@ export class PracticeEngine {
     const t = now - this.startTime - this.settings.latencyMs / 1000;
 
     if (now < this.startTime) {
-      const beatsLeft = Math.ceil((this.startTime - now) / this.beatSeconds);
+      const beatsLeft = Math.max(1, Math.ceil((this.startTime - now) / this.beatSeconds - 0.002));
       if (beatsLeft !== this.state.countdownBeat) this.emit({ countdownBeat: beatsLeft });
       return;
     }
 
     if (this.settings.clickDuringPlay) {
+      /* Schedule clicks a little ahead on the audio clock. Beats already in
+         the past are skipped, so switching the metronome on mid-piece does
+         not fire a burst of missed clicks. */
       while (this.startTime + this.nextClickBeat * this.beatSeconds < now + 0.25) {
-        if (this.nextClickBeat < this.timeline.totalBeats) {
-          this.click(this.startTime + this.nextClickBeat * this.beatSeconds, this.nextClickBeat % this.timeline.beatsPerMeasure === 0);
+        const time = this.startTime + this.nextClickBeat * this.beatSeconds;
+        if (this.nextClickBeat < this.timeline.totalBeats && time >= now - 0.005) {
+          this.click(time, this.nextClickBeat % this.timeline.beatsPerMeasure === 0);
         }
         this.nextClickBeat += 1;
       }
+    } else {
+      this.nextClickBeat = Math.max(this.nextClickBeat, Math.ceil((now - this.startTime) / this.beatSeconds));
     }
 
     this.analyser.getFloatTimeDomainData(this.buffer);
     const db = toDecibels(rmsOf(this.buffer));
     const silent = db < this.settings.silenceDb;
-    const estimate = silent ? null : detectPitchNsdf(this.buffer, this.context.sampleRate, { minFrequency: 55, maxFrequency: 1500 });
+    const estimate = silent
+      ? null
+      : detectPitchNsdf(this.buffer, this.context.sampleRate, { minFrequency: 55, maxFrequency: 1500, minClarity: this.settings.pitchClarity });
+    const smoothedMidi = this.smoother.push(estimate?.midi ?? null);
     const frame: Frame = { t, db, midi: estimate?.midi ?? null };
     this.frames.push(frame);
     this.detectOnsets(frame, silent);
@@ -322,9 +345,10 @@ export class PracticeEngine {
     const grades = gradesChanged || markCurrent ? [...this.state.grades] : this.state.grades;
     if (markCurrent) grades[currentNoteIndex] = { ...grades[currentNoteIndex], status: "current" };
 
-    const live = estimate
-      ? { midi: estimate.midi, name: midiToName(estimate.midi), cents: (estimate.midi - Math.round(estimate.midi)) * 100, db }
-      : { midi: null, name: null, cents: null, db };
+    const live =
+      smoothedMidi !== null
+        ? { midi: smoothedMidi, name: midiToName(smoothedMidi), cents: (smoothedMidi - Math.round(smoothedMidi)) * 100, db }
+        : { midi: null, name: null, cents: null, db };
 
     this.emit({
       phase: "playing",
@@ -413,11 +437,18 @@ export class PracticeEngine {
       return result;
     }
 
-    /* Pitch: the median of the sustained part of the note. */
+    /* Pitch: the median of the sustained part of the note. With
+       ignoreOctave the distance is measured to the nearest octave of the
+       written pitch, so only the note name and its cents matter. */
     if (pitched.length >= 2 && pitched.length >= core.length * 0.2) {
       const playedMidi = median(pitched.map((frame) => frame.midi));
-      const expected = note.midis.reduce((best, midi) => (Math.abs(midi - playedMidi) < Math.abs(best - playedMidi) ? midi : best), note.midis[0]);
-      const cents = (playedMidi - expected) * 100;
+      const distance = (midi: number) => {
+        const raw = playedMidi - midi;
+        if (!settings.ignoreOctave) return raw;
+        return ((((raw + 6) % 12) + 12) % 12) - 6;
+      };
+      const expected = note.midis.reduce((best, midi) => (Math.abs(distance(midi)) < Math.abs(distance(best)) ? midi : best), note.midis[0]);
+      const cents = distance(expected) * 100;
       result.pitch = { playedMidi, playedName: midiToName(playedMidi), cents, ok: Math.abs(cents) <= settings.pitchToleranceCents };
     } else {
       result.pitch = { playedMidi: null, playedName: null, cents: null, ok: false };
