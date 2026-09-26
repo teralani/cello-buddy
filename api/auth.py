@@ -39,12 +39,10 @@ db_dependency = Annotated[Session, Depends(get_db)]
 @router.post("/", status_code=status.HTTP_201_CREATED)
 def create_user(create_user_request: UsersBase, db: db_dependency):
     create_user_model = Users(
-        first_name=create_user_request.first_name,
-        last_name=create_user_request.last_name,
+        name=create_user_request.name,
         email=create_user_request.email,
+        high_score=create_user_request.high_score,
         password_hash=bcrypt_context.hash(create_user_request.password_hash),
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
     )
     db.add(create_user_model)
     db.commit()
@@ -70,7 +68,7 @@ def login_for_access_token(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate user"
         )
-    token = create_access_token(user.email, user.id, timedelta(minutes=20))
+    token = create_access_token(user.email, user.user_id, timedelta(minutes=20))
     return {"access_token": token, "token_type": "bearer"}
 
 

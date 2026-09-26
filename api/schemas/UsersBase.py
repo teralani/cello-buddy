@@ -7,8 +7,6 @@ class UsersBase(BaseModel):
     email: str
     high_score: float
     password_hash: str
-    created_at: datetime
-    updated_at: datetime
 
 
 class UserLogin(BaseModel):

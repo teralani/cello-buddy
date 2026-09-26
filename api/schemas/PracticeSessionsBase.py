@@ -7,5 +7,6 @@ class PracticeSessionsBase(BaseModel):
     notes_correct: float
     correct_bow_pos: float
     articulation: float
+    time_created: datetime
     final_score: float
 
