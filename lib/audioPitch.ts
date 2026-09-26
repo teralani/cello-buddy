@@ -57,3 +57,85 @@ export class IntonationTracker {
 export function detectOnset(previousRms: number, currentRms: number, timestamp: number, lastOnset: number) {
   return currentRms - previousRms > 0.035 && timestamp - lastOnset >= 120;
 }
+/* Normalized square difference (McLeod) pitch detection. More robust than
+   plain autocorrelation on low cello strings, where the strong second
+   harmonic often wins a raw correlation peak. Returns null when the frame
+   is too quiet or too noisy to be trusted. */
+export type PitchEstimate = { frequency: number; midi: number; clarity: number };
+
+export function detectPitchNsdf(
+  buffer: Float32Array,
+  sampleRate: number,
+  options: { minFrequency?: number; maxFrequency?: number; minClarity?: number } = {},
+): PitchEstimate | null {
+  const minFrequency = options.minFrequency ?? 55;
+  const maxFrequency = options.maxFrequency ?? 1400;
+  const minClarity = options.minClarity ?? 0.85;
+  const size = buffer.length;
+  const minLag = Math.max(2, Math.floor(sampleRate / maxFrequency));
+  const maxLag = Math.min(Math.floor(sampleRate / minFrequency), size - 2);
+  if (maxLag <= minLag) return null;
+
+  const nsdf = new Float32Array(maxLag + 1);
+  for (let lag = minLag; lag <= maxLag; lag += 1) {
+    let acf = 0;
+    let energy = 0;
+    for (let index = 0; index < size - lag; index += 1) {
+      const a = buffer[index];
+      const b = buffer[index + lag];
+      acf += a * b;
+      energy += a * a + b * b;
+    }
+    nsdf[lag] = energy > 0 ? (2 * acf) / energy : 0;
+  }
+
+  /* Peak picking: the first strong key maximum after the first negative zero crossing. */
+  const peaks: number[] = [];
+  let lag = minLag;
+  while (lag <= maxLag && nsdf[lag] > 0) lag += 1;
+  while (lag <= maxLag) {
+    while (lag <= maxLag && nsdf[lag] <= 0) lag += 1;
+    let best = -1;
+    let bestValue = 0;
+    while (lag <= maxLag && nsdf[lag] > 0) {
+      if (nsdf[lag] > bestValue) {
+        bestValue = nsdf[lag];
+        best = lag;
+      }
+      lag += 1;
+    }
+    if (best > 0) peaks.push(best);
+  }
+  if (peaks.length === 0) return null;
+
+  const highest = Math.max(...peaks.map((peak) => nsdf[peak]));
+  const threshold = highest * 0.9;
+  const chosen = peaks.find((peak) => nsdf[peak] >= threshold);
+  if (chosen === undefined) return null;
+  const clarity = nsdf[chosen];
+  if (clarity < minClarity) return null;
+
+  /* Parabolic interpolation around the chosen lag for sub-sample accuracy. */
+  let refined = chosen;
+  if (chosen > minLag && chosen < maxLag) {
+    const left = nsdf[chosen - 1];
+    const center = nsdf[chosen];
+    const right = nsdf[chosen + 1];
+    const denominator = left - 2 * center + right;
+    if (denominator !== 0) refined = chosen + (0.5 * (left - right)) / denominator;
+  }
+
+  const frequency = sampleRate / refined;
+  if (!Number.isFinite(frequency) || frequency < minFrequency || frequency > maxFrequency) return null;
+  return { frequency, midi: 69 + 12 * Math.log2(frequency / 440), clarity };
+}
+
+export function rmsOf(buffer: Float32Array) {
+  let sum = 0;
+  for (let index = 0; index < buffer.length; index += 1) sum += buffer[index] * buffer[index];
+  return Math.sqrt(sum / buffer.length);
+}
+
+export function toDecibels(rms: number) {
+  return rms > 0 ? 20 * Math.log10(rms) : -120;
+}
