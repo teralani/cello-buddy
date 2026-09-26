@@ -43,6 +43,14 @@ performers, sessions, and camera angles.
 python model-training\collect_articulation.py --performer p01 --session s01 --hand-model models\hand_landmarker.task --out model-training\data\articulation.csv
 ```
 
+You can choose the microphone without editing the script. On the listed laptop,
+device `1` (MME) and device `9` (WASAPI) are usable; device `16` is a WDM-KS
+endpoint that may not support this callback-based collector:
+
+```powershell
+python model-training\collect_articulation.py --performer p01 --session s01 --hand-model public\models\hand_landmarker.task --device 9 --out model-training\data\articulation.csv
+```
+
 The four articulation labels are:
 
 - `1`: `legato`
@@ -57,6 +65,10 @@ movement changes direction. The same behavior is used by the website's
 by an upbow creates one boundary, and the upbow followed by a downbow creates
 the next one. Repeat every articulation on both directions, across performers,
 sessions, and tempos.
+
+The collector also listens to the microphone and keeps only strokes with
+sustained sound. Silent bow placement and silent retakes are therefore excluded
+from the articulation dataset rather than being mislabeled as a bow style.
 
 The local collector uses `N` for onset labels because it does not run the
 production microphone pipeline. In the website, Web Audio onset timestamps are

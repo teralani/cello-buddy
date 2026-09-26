@@ -4,7 +4,7 @@ import { BowStrokeSegmenter } from "@/lib/bowArticulation";
 import { articulationModel } from "@/lib/models/articulation.generated";
 import { postureModel } from "@/lib/models/posture.generated";
 
-type WorkerInput = { type: "configure" | "frame"; bitmap?: ImageBitmap; timestamp?: number };
+type WorkerInput = { type: "configure" | "frame" | "onset" | "audio"; bitmap?: ImageBitmap; timestamp?: number; active?: boolean };
 type ImageLandmark = { x: number; y: number; z: number; visibility?: number };
 let pose: PoseLandmarker | undefined;
 let hand: HandLandmarker | undefined;
@@ -24,6 +24,8 @@ async function configure() {
 
 self.onmessage = async ({ data }: MessageEvent<WorkerInput>) => {
   if (data.type === "configure") return configure();
+  if (data.type === "onset") { strokeSegmenter.addOnset(); return; }
+  if (data.type === "audio") { strokeSegmenter.setAudioActive(data.active === true); return; }
   if (!pose || !hand || !data.bitmap || data.timestamp === undefined) {
     data.bitmap?.close();
     return;
@@ -53,7 +55,7 @@ self.onmessage = async ({ data }: MessageEvent<WorkerInput>) => {
   history.push(prediction.label); if (history.length > 10) history.shift();
   const counts = history.reduce<Record<string, number>>((all, item) => ({ ...all, [item]: (all[item] ?? 0) + 1 }), {});
   const smoothedLabel = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
-  const stroke = strokeSegmenter.push(landmarks[16].x, data.timestamp);
+  const stroke = strokeSegmenter.push(handLandmarks[0].x, data.timestamp);
   const articulation = stroke && articulationModel.predict([stroke.durationMs, stroke.meanSpeed, stroke.speedVariance, stroke.noteOnsetCount]);
   postMessage({ type: "result", label: smoothedLabel, probabilities: prediction.probabilities, articulation: articulation?.label, articulationProbabilities: articulation?.probabilities, features, bowHandX, poseLandmarks: imagePoseLandmarks, handLandmarks: imageHandLandmarks });
   data.bitmap.close();

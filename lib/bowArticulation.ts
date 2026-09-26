@@ -8,8 +8,15 @@ export class BowStrokeSegmenter {
   private startedAt = 0;
   private speeds: number[] = [];
   private onsetCount = 0;
+  private soundSamples = 0;
+  private activeSoundSamples = 0;
 
   addOnset() { this.onsetCount += 1; }
+
+  setAudioActive(active: boolean) {
+    this.soundSamples += 1;
+    if (active) this.activeSoundSamples += 1;
+  }
 
   push(x: number, timestamp: number): Stroke | null {
     if (this.lastX === null) { this.lastX = x; this.lastTime = timestamp; this.startedAt = timestamp; return null; }
@@ -23,8 +30,10 @@ export class BowStrokeSegmenter {
     const speeds = this.speeds.length ? this.speeds : [0];
     const meanSpeed = speeds.reduce((sum, value) => sum + value, 0) / speeds.length;
     const speedVariance = speeds.reduce((sum, value) => sum + (value - meanSpeed) ** 2, 0) / speeds.length;
+    const soundRatio = this.soundSamples ? this.activeSoundSamples / this.soundSamples : 0;
     this.startedAt = timestamp; this.speeds = []; this.direction = nextDirection;
-    if (durationMs < 80) return null;
+    this.soundSamples = 0; this.activeSoundSamples = 0;
+    if (durationMs < 80 || soundRatio < 0.25) { this.onsetCount = 0; return null; }
     const stroke = { durationMs, meanSpeed, speedVariance, noteOnsetCount: this.onsetCount };
     this.onsetCount = 0;
     return stroke;
