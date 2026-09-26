@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { buttonClass } from "@/components/button";
 
 export const SCORE_NAME_KEY = "cello-buddy:score-name";
 
@@ -15,7 +16,7 @@ export default function UploadForm() {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!fileName) {
-      setError("Pick a file before tuning in.");
+      setError("Choose a score to continue.");
       return;
     }
     try {
@@ -30,15 +31,15 @@ export default function UploadForm() {
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <label
         htmlFor="score-file"
-        className="block cursor-pointer border-4 border-dashed border-ink bg-screen-dim px-6 py-8 text-center hover:bg-butter hover:text-night [&:hover_span]:text-night"
+        className={`block cursor-pointer rounded-lg border border-dashed bg-surface px-6 py-10 text-center transition-colors hover:border-foreground has-[:focus-visible]:border-foreground ${
+          error ? "border-danger" : "border-border-strong"
+        }`}
       >
-        <span className="block font-display text-3xl leading-none break-all">
-          {fileName ?? "Drop in your sheet music"}
+        <span className="block text-sm font-medium break-all">
+          {fileName ?? "Choose a score"}
         </span>
-        <span className="mt-2 block text-sm text-ink-soft">
-          {fileName
-            ? "Click to choose a different file"
-            : "MusicXML or .mxl, or any file for now"}
+        <span className="mt-1 block text-sm text-muted">
+          {fileName ? "Click to choose a different file" : "MusicXML or .mxl"}
         </span>
         <input
           id="score-file"
@@ -54,16 +55,13 @@ export default function UploadForm() {
       </label>
 
       {error ? (
-        <p role="alert" className="bg-rose px-3 py-2 text-sm text-night">
+        <p role="alert" className="text-sm text-danger">
           {error}
         </p>
       ) : null}
 
-      <button
-        type="submit"
-        className="self-start bg-peach text-night border-4 border-ink px-6 py-2 font-display text-3xl leading-none uppercase tracking-wider hard-shadow-ink hover:bg-butter active:translate-x-[3px] active:translate-y-[3px] active:shadow-none"
-      >
-        Tune in
+      <button type="submit" className={buttonClass("primary", "self-start")}>
+        Start practicing
       </button>
     </form>
   );

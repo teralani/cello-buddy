@@ -21,11 +21,11 @@ function getServerSnapshot() {
 }
 
 /* Reads the uploaded file name saved by the landing page. */
-export default function ScoreTitle() {
+export default function ScoreTitle({ className = "" }: { className?: string }) {
   const name = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   return (
-    <span className="truncate" title={name ?? undefined}>
+    <span className={`truncate ${className}`} title={name ?? undefined}>
       {name ?? "Untitled score"}
     </span>
   );

@@ -1,36 +1,41 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Cello Buddy
 
-## Getting Started
+A practice companion for cellists. Upload a MusicXML score, play it with your webcam on, then review the session with a chatbot that gives actionable feedback and links into teaching videos at the right moment.
 
-First, run the development server:
+## Getting started
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Create `.env.local` in the repo root. It is gitignored.
 
-## Learn More
+```
+ANTHROPIC_API_KEY=sk-ant-...
+VOYAGE_API_KEY=pa-...
+```
 
-To learn more about Next.js, take a look at the following resources:
+- `ANTHROPIC_API_KEY` powers the feedback chatbot. Without it the chat page shows an error instead of a review.
+- `VOYAGE_API_KEY` is used for embeddings. It is needed to build the lesson index and, at runtime, to embed each question for retrieval. Without it the chatbot still works but does not suggest video clips.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Feedback chatbot
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. The practice screen writes the session's metrics JSON to `sessionStorage` under the key in `lib/metrics.ts` (`METRICS_KEY`). The shape is the `PracticeMetrics` type in that file. Until the recorder exists, the Review feedback button writes a sample session if nothing has been recorded.
+2. The feedback page at `/feedback` sends the metrics and the chat history to `app/api/feedback/route.ts`, which streams a reply from Claude as newline-delimited JSON.
+3. On each turn the route embeds the question, finds the closest transcript chunks in `data/lesson-index.json`, and gives them to the model so it can recommend a timestamped YouTube link.
 
-## Deploy on Vercel
+## Building the lesson index
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+The video list lives in `scripts/build-lesson-index.ts`. The script fetches each video's captions, splits them into chunks of about 45 seconds, embeds the chunks with Voyage AI, and writes `data/lesson-index.json`.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run build-index -- --dry-run   # fetch and chunk only, no key needed
+npm run build-index                # embed and write the index
+```
+
+Commit the generated JSON so the deployed app can use it.
