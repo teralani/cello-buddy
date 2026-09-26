@@ -22,7 +22,7 @@ export default function UploadForm() {
       return;
     }
     try {
-      window.sessionStorage.setItem(SCORE_NAME_KEY, fileName);
+      window.localStorage.setItem(SCORE_NAME_KEY, fileName);
       const reader = new FileReader();
       reader.readAsDataURL(mxlFile);
       reader.onloadend = () => {
