@@ -1,26 +1,73 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --room: #1c1d26;
+  --cabinet: #3a3b4a;
+  --cabinet-dark: #2f303d;
+  --cabinet-edge: #55576b;
+  --bezel: #2a2b36;
+  --screen: #262838;
+  --screen-dim: #313446;
+  --screen-edge: #4a4d66;
+  --ink: #dcdcea;
+  --ink-soft: #9c9eb4;
+  --night: #1c1d26;
+  --peach: #c9cbee;
+  --butter: #b4b8f0;
+  --lilac: #d6d2f2;
+  --sky: #c0c4e8;
+  --rose: #b9bcd9;
+  --knob: #c9cbee;
+  --knob-mark: #6b6e8f;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-room: var(--room);
+  --color-cabinet: var(--cabinet);
+  --color-cabinet-dark: var(--cabinet-dark);
+  --color-cabinet-edge: var(--cabinet-edge);
+  --color-bezel: var(--bezel);
+  --color-screen: var(--screen);
+  --color-screen-dim: var(--screen-dim);
+  --color-screen-edge: var(--screen-edge);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-night: var(--night);
+  --color-peach: var(--peach);
+  --color-butter: var(--butter);
+  --color-lilac: var(--lilac);
+  --color-sky: var(--sky);
+  --color-rose: var(--rose);
+  --color-knob: var(--knob);
+  --color-knob-mark: var(--knob-mark);
+  --font-display: var(--font-vt323);
+  --font-mono: var(--font-plex-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--room);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--room);
+  color: var(--ink);
+  font-family: var(--font-plex-mono), "Courier New", monospace;
+}
+
+/* Scanlines come from a tiled one-by-three pixel SVG so the screen reads as a tube. */
+.scanlines {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1' height='3'><rect width='1' height='1' fill='%23000000' fill-opacity='0.22'/></svg>");
+  background-repeat: repeat;
+}
+
+.hard-shadow {
+  box-shadow: 4px 4px 0 0 var(--night);
+}
+
+.hard-shadow-ink {
+  box-shadow: 3px 3px 0 0 var(--night);
+}
+
+.screen-curve {
+  border-radius: 18px / 14px;
 }
