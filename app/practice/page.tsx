@@ -1,6 +1,10 @@
+"use client"
 import Link from "next/link";
 import PlaceholderPanel from "@/components/placeholder-panel";
 import ScoreTitle from "./score-title";
+import OpenSheetMusicDisplay from "@/components/open-sheet-music-display";
+import dataURLtoFile from "@/helpers";
+import { SCORE_MXL, SCORE_NAME_KEY } from "@/components/upload-form";
 
 export default function PracticePage() {
   return (
@@ -36,12 +40,26 @@ export default function PracticePage() {
         </section>
 
         <section aria-label="Sheet music" className="min-h-0 overflow-hidden bg-bezel">
-          <PlaceholderPanel
-            title="Sheet music"
-            note="The score renders here and a cursor will follow along as you play."
+          <OpenSheetMusicDisplay
+            file = {
+                dataURLtoFile(getMXLFromLocalStorage(), getScoreNameFromLocalStorage())
+            }
           />
         </section>
       </div>
     </main>
   );
+}
+
+function getMXLFromLocalStorage(): string {
+  const dataURL = window.localStorage.getItem(SCORE_MXL);
+  if (!dataURL) {throw new Error("MXL file not found");}
+  return dataURL;
+  
+}
+
+function getScoreNameFromLocalStorage(): string {
+  const filename = window.localStorage.getItem(SCORE_NAME_KEY);
+  if (!filename) {throw new Error("MXL filename not found")};
+  return filename;
 }

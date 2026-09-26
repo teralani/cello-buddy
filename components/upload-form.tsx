@@ -4,22 +4,30 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
 export const SCORE_NAME_KEY = "cello-buddy:score-name";
+export const SCORE_MXL = "cello-buddy:score-file-mxl"
 
 /* Accepts any file for now. The file is not read or sent anywhere.
    Only its name is kept so the practice screen can show what was loaded. */
 export default function UploadForm() {
   const router = useRouter();
   const [fileName, setFileName] = useState<string | null>(null);
+  const [mxlFile, setMxlFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!fileName) {
+    if (!fileName || !mxlFile) {
       setError("Pick a file before tuning in.");
       return;
     }
     try {
       window.sessionStorage.setItem(SCORE_NAME_KEY, fileName);
+      const reader = new FileReader();
+      reader.readAsDataURL(mxlFile);
+      reader.onloadend = () => {
+        console.log(reader.result);
+        window.localStorage.setItem(SCORE_MXL, String(reader.result));
+      };
     } catch {
       /* Session storage may be unavailable. The practice page handles a missing name. */
     }
@@ -48,6 +56,7 @@ export default function UploadForm() {
           onChange={(event) => {
             const file = event.target.files?.[0];
             setFileName(file ? file.name : null);
+            setMxlFile(file ? file : null);
             setError(null);
           }}
         />
