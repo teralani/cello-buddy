@@ -183,9 +183,26 @@ function StatTile({ label, value, detail }: { label: string; value: string; deta
   );
 }
 
+/* The measure with the lowest combined pitch and timing accuracy: the one
+   place to drill next. null when no measure has a score on either axis. */
+function toughestMeasure(measures: MeasureMetrics[]): MeasureMetrics | null {
+  let worst: MeasureMetrics | null = null;
+  let worstScore = Infinity;
+  for (const measure of measures) {
+    const scores = [measure.pitch.accuracyPct, measure.timing.accuracyPct].filter((v): v is number => v !== null);
+    if (scores.length === 0) continue;
+    const score = scores.reduce((a, b) => a + b, 0) / scores.length;
+    if (score < worstScore) {
+      worstScore = score;
+      worst = measure;
+    }
+  }
+  return worst;
+}
+
 function StatTiles({ metrics }: { metrics: PracticeMetrics }) {
-  const { summary, tempo } = metrics;
-  const tempoDelta = tempo.averagePlayed === null ? null : Math.round(tempo.averagePlayed - tempo.target);
+  const { summary } = metrics;
+  const toughest = toughestMeasure(metrics.measures);
   return (
     <div className="grid grid-cols-2 gap-2">
       <StatTile
@@ -204,14 +221,18 @@ function StatTiles({ metrics }: { metrics: PracticeMetrics }) {
         detail={summary.articulationAccuracyPct === null ? "No style markings" : "Marked notes matched"}
       />
       <StatTile
-        label="Tempo"
-        value={tempo.averagePlayed === null ? "—" : `${Math.round(tempo.averagePlayed)} bpm`}
-        detail={tempoDelta === null ? `target ${tempo.target} bpm` : `${signed(tempoDelta)} vs ${tempo.target} target`}
-      />
-      <StatTile
         label="Measures played"
         value={`${metrics.measures.length}/${metrics.measuresInPiece}`}
         detail={`${summary.gradedNotes} notes · ${formatDuration(metrics.durationSeconds)}${metrics.completed ? "" : " · stopped early"}`}
+      />
+      <StatTile
+        label="Toughest measure"
+        value={toughest === null ? "—" : `m. ${toughest.number}`}
+        detail={
+          toughest === null
+            ? "No measure scored"
+            : `pitch ${percent(toughest.pitch.accuracyPct)} · timing ${percent(toughest.timing.accuracyPct)}`
+        }
       />
     </div>
   );
@@ -467,23 +488,14 @@ function BowPath({ metrics }: { metrics: PracticeMetrics }) {
    `value` is null when the session did not measure that area. */
 type RadarAxis = { label: string; value: number | null; basis: string };
 
-/* Bpm off target per point lost on the tempo spoke: 5 bpm off scores 80. */
-const TEMPO_POINTS_PER_BPM = 4;
-
 function radarAxes(metrics: PracticeMetrics): RadarAxis[] {
-  const { summary, tempo } = metrics;
-  const tempoOff = tempo.averagePlayed === null ? null : Math.round(tempo.averagePlayed - tempo.target);
+  const { summary } = metrics;
   const share = summary.bow?.horizontalShare ?? null;
   return [
     { label: "Pitch", value: summary.pitchAccuracyPct, basis: "Notes within the pitch tolerance" },
     { label: "Rhythm", value: summary.timingAccuracyPct, basis: "Onsets within the timing tolerance" },
-    {
-      label: "Tempo",
-      value: tempoOff === null ? null : Math.max(0, 100 - Math.abs(tempoOff) * TEMPO_POINTS_PER_BPM),
-      basis: tempoOff === null ? "Tempo not measured" : `Averaged ${signed(tempoOff, " bpm")} from the ${tempo.target} bpm target`,
-    },
     { label: "Bow", value: share === null ? null : Math.round(share * 100), basis: "Share of bow-arm travel that was sideways" },
-    { label: "Slurs", value: summary.slurAccuracyPct, basis: "Slurred notes kept in one bow" },
+    { label: "Musical Slurs", value: summary.slurAccuracyPct, basis: "Slurred notes kept in one bow" },
     { label: "Articulation", value: summary.articulationAccuracyPct, basis: "Explicit style markings matched" },
     { label: "Dynamics", value: summary.dynamicAccuracyPct, basis: "Notes played at the marked dynamic" },
   ];
