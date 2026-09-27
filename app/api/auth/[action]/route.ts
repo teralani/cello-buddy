@@ -1,8 +1,14 @@
 import { cookies } from "next/headers";
+import {
+  BackendUnavailable,
+  backendErrorMessage,
+  callBackend,
+  isRecord,
+  unavailableResponse,
+} from "@/lib/server/backend";
 import { SESSION_COOKIE } from "@/lib/session";
 
 const SESSION_TTL_SECONDS = 20 * 60;
-const API_BASE_URL = (process.env.API_BASE_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 
 type RequestBody = {
   email?: unknown;
@@ -10,23 +16,9 @@ type RequestBody = {
   password?: unknown;
 };
 
-function getErrorMessage(payload: unknown, fallback: string): string {
-  if (typeof payload !== "object" || payload === null) return fallback;
-  const detail = (payload as { detail?: unknown }).detail;
-  if (typeof detail === "string") return detail;
-  if (Array.isArray(detail)) {
-    const messages = detail
-      .map((item) =>
-        typeof item === "object" && item !== null && "msg" in item
-          ? String(item.msg)
-          : "",
-      )
-      .filter(Boolean);
-    if (messages.length > 0) return messages.join(" ");
-  }
-  return fallback;
-}
-
+/* Sign in, register, or sign out against the FastAPI backend. A successful
+   sign-in or registration stores the backend's access token in the session
+   cookie; see lib/server/backend.ts for how the backend is reached. */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ action: string }> },
@@ -57,49 +49,29 @@ export async function POST(
     );
   }
 
-  let backendResponse: Response;
+  let result;
   try {
-    if (action === "register") {
-      backendResponse = await fetch(`${API_BASE_URL}/auth/`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, high_score: 0, password_hash: password }),
-        cache: "no-store",
-      });
-    } else {
-      const credentials = new URLSearchParams({ username: email, password });
-      backendResponse = await fetch(`${API_BASE_URL}/auth/token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: credentials,
-        cache: "no-store",
-      });
-    }
-  } catch {
-    return Response.json(
-      { error: "The backend API is unavailable. Start it and try again." },
-      { status: 503 },
-    );
+    result =
+      action === "register"
+        ? await callBackend(request, "/auth/", {
+            method: "POST",
+            body: { name, email, high_score: 0, password_hash: password },
+          })
+        : await callBackend(request, "/auth/token", {
+            method: "POST",
+            body: new URLSearchParams({ username: email, password }),
+          });
+  } catch (error) {
+    if (error instanceof BackendUnavailable) return unavailableResponse();
+    throw error;
   }
 
-  let payload: unknown;
-  try {
-    payload = await backendResponse.json();
-  } catch {
-    payload = null;
-  }
-  if (!backendResponse.ok) {
+  if (!result.ok) {
     const fallback = action === "register" ? "Could not create your account." : "Email or password is incorrect.";
-    return Response.json(
-      { error: getErrorMessage(payload, fallback) },
-      { status: backendResponse.status },
-    );
+    return Response.json({ error: backendErrorMessage(result.payload, fallback) }, { status: result.status });
   }
 
-  const accessToken =
-    typeof payload === "object" && payload !== null && "access_token" in payload
-      ? payload.access_token
-      : null;
+  const accessToken = isRecord(result.payload) ? result.payload.access_token : null;
   if (typeof accessToken !== "string" || !accessToken) {
     return Response.json({ error: "The backend returned an invalid session." }, { status: 502 });
   }

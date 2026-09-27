@@ -19,11 +19,16 @@ def get_user(user_d: user_dep, id: int, db: db_dep):
     if user_d is None:
         raise HTTPException(status_code=401, detail="Authentication Failed")
 
-    db_user = db.query(Users).filter(Users.id == id).first()
+    db_user = db.query(Users).filter(Users.user_id == id).first()
     if db_user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User does not exist")
-    else:
-        return db_user
+    # Never hand the password hash to a client.
+    return {
+        "user_id": db_user.user_id,
+        "name": db_user.name,
+        "email": db_user.email,
+        "high_score": db_user.high_score,
+    }
 
 
 @user_router.post("/create-user/", status_code=status.HTTP_201_CREATED)
@@ -43,7 +48,7 @@ def update_user(user_d: user_dep, id: int, user: UsersBase, db: db_dep):
     if user_d is None:
         raise HTTPException(status_code=401, detail="Authentication Failed")
 
-    db_user = db.query(Users).filter(Users.id == id).first()
+    db_user = db.query(Users).filter(Users.user_id == id).first()
     if db_user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User does not exist")
     for key, value in user.model_dump(exclude_unset=True).items():
@@ -60,7 +65,7 @@ def delete_user(user_d: user_dep, id: int, db: db_dep):
     if user_d is None:
         raise HTTPException(status_code=401, detail="Authentication Failed")
 
-    db_user = db.query(Users).filter(Users.id == id).first()
+    db_user = db.query(Users).filter(Users.user_id == id).first()
     if db_user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User does not exist")
     db.delete(db_user)
@@ -79,13 +84,13 @@ def login(user: UserLogin, db: db_dep):
         if not bcrypt_context.verify(user.password_hash, pass_w):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Incorrect Password")
 
-    token = create_access_token(db_user.email, db_user.id, timedelta(minutes=20))
+    token = create_access_token(db_user.email, db_user.user_id, timedelta(minutes=20))
     return {"access_token": token, "token_type": "bearer"}
 
 
 # @user_router.get("/home", status_code=status.HTTP_200_OK)
 # def get_cur_user(db: db_dep, cur_user: dict = Depends(get_current_user)):
-#     user = db.query(Users).filter(Users.id == cur_user["id"]).first()
+#     user = db.query(Users).filter(Users.user_id == cur_user["id"]).first()
 
 #     if not user:
 #         raise HTTPException(status.HTTP_404_NOT_FOUND, "Invalid User")
