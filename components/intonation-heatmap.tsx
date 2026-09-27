@@ -1,5 +1,7 @@
 "use client";
 
+import PanelSection from "@/components/panel-section";
+
 const strings = ["A", "D", "G", "C"];
 const notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
@@ -16,12 +18,8 @@ function heatStyle(cents: number | null) {
 
 export default function IntonationHeatmap() {
   return (
-    <div className="flex h-full flex-col gap-4 bg-background p-4 sm:p-6">
-      <div className="flex items-end justify-between border-b-2 border-border-strong pb-3">
-        <div><p className="text-xs uppercase tracking-widest text-muted">Pitch map</p><h2 className="font-display text-4xl uppercase">Intonation</h2></div>
-        <span className="text-xs uppercase text-muted">Live / cents</span>
-      </div>
-      <div className="overflow-hidden border border-border-strong bg-[#111216] p-3 shadow-inner">
+    <PanelSection eyebrow="Pitch map" title="Intonation" aside={<span className="uppercase">Live / cents</span>}>
+      <div className="overflow-hidden rounded-md border border-border-strong bg-[#111216] p-3 shadow-inner">
         <div className="w-[133.333%] min-w-170">
           <div className="grid grid-cols-[3rem_repeat(12,minmax(2rem,1fr))] items-end text-center text-[10px] uppercase text-muted">
             <span />{notes.map((note) => <span key={note} className="pb-2">{note}</span>)}
@@ -47,10 +45,10 @@ export default function IntonationHeatmap() {
           </div>
         </div>
       </div>
-      <div className="mt-auto border-t-2 border-border-strong pt-3 text-xs uppercase">
-        <div className="mb-2 h-2 w-full bg-[linear-gradient(90deg,#238bd1_0%,#56c8bf_35%,#6ccf68_50%,#f0c64c_68%,#d94f49_100%)]" />
+      <div className="text-xs uppercase">
+        <div className="mb-2 h-2 w-full rounded-full bg-[linear-gradient(90deg,#238bd1_0%,#56c8bf_35%,#6ccf68_50%,#f0c64c_68%,#d94f49_100%)]" />
         <div className="flex justify-between text-muted"><span>-40¢ flat</span><span>In tune</span><span>+40¢ sharp</span></div>
       </div>
-    </div>
+    </PanelSection>
   );
 }

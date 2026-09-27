@@ -1,52 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type FormEvent,
-} from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { FIRST_PROMPT, type ChatEvent, type LessonSource } from "@/lib/chat";
 import { buttonClass } from "@/components/button";
-import { METRICS_KEY, isPracticeMetrics, type PracticeMetrics } from "@/lib/metrics";
+import type { PracticeMetrics } from "@/lib/metrics";
+import { useSessionMetrics } from "@/lib/useSessionMetrics";
 
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
 };
-
-/* Raw metrics JSON from sessionStorage. `undefined` means not hydrated yet. */
-function subscribe(onChange: () => void) {
-  window.addEventListener("storage", onChange);
-  return () => window.removeEventListener("storage", onChange);
-}
-
-function getSnapshot(): string | null {
-  try {
-    return window.sessionStorage.getItem(METRICS_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function getServerSnapshot(): undefined {
-  return undefined;
-}
-
-/* Metrics written by an older build of the practice screen fail the shape
-   check and count as no session, so the chat never reviews stale data. */
-function parseMetrics(raw: string | null | undefined): PracticeMetrics | null {
-  if (!raw) return null;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return isPracticeMetrics(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -258,8 +222,7 @@ function suggestQuestions(metrics: PracticeMetrics): string[] {
 }
 
 export default function ChatThread() {
-  const raw = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  const metrics = useMemo(() => parseMetrics(raw), [raw]);
+  const metrics = useSessionMetrics();
   const [streaming, setStreaming] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   /* Every clip the server has sent this session, keyed by URL, so links in
@@ -387,7 +350,7 @@ export default function ChatThread() {
     messages[0].content.length > 0;
   const suggestions = metrics && reviewDone ? suggestQuestions(metrics) : [];
 
-  if (raw === undefined) {
+  if (metrics === undefined) {
     return <p className="p-6 text-sm text-muted">Loading session.</p>;
   }
 

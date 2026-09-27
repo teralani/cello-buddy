@@ -2,7 +2,7 @@ import Link from "next/link";
 import AppHeader from "@/components/app-header";
 import { buttonClass } from "@/components/button";
 import ChatThread from "@/components/chat-thread";
-import IntonationHeatmap from "@/components/intonation-heatmap";
+import SessionInsights from "@/components/session-insights";
 
 export default function FeedbackPage() {
   return (
@@ -24,8 +24,8 @@ export default function FeedbackPage() {
         <section aria-label="Session review" className="min-h-0 min-w-0">
           <ChatThread />
         </section>
-        <aside aria-label="Intonation heatmap" className="min-h-0 overflow-y-auto border-t border-border bg-background lg:border-l lg:border-t-0">
-          <IntonationHeatmap />
+        <aside aria-label="Session charts" className="min-h-0 max-h-[55dvh] overflow-y-auto border-t border-border bg-background lg:max-h-none lg:border-l lg:border-t-0">
+          <SessionInsights />
         </aside>
       </div>
     </main>
