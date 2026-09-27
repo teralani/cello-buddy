@@ -27,6 +27,10 @@ import {
 import { buildTimeline, type ScoreTimeline } from "@/lib/scoreTimeline";
 import { setSessionFinisher } from "@/lib/sessionHandoff";
 
+/* Range covered by the tempo slider. The text box accepts any positive value. */
+const TEMPO_SLIDER_MIN = 20;
+const TEMPO_SLIDER_MAX = 240;
+
 /* The practice screen below the header: the play bar, the note strip, and
    the camera and sheet music panels. Owns the engine and the score overlay. */
 export default function PracticeWorkspace() {
@@ -38,6 +42,12 @@ export default function PracticeWorkspace() {
   const [loadError, setLoadError] = useState<string | null>(stored.error);
   const [timeline, setTimeline] = useState<ScoreTimeline | null>(null);
   const [settings, setSettings] = useState<PracticeSettings>(loadSettings);
+  /* What was last typed in the tempo box, and the bpm in force at the time.
+     While settings.bpm still matches, the box shows the typed text as is, so
+     it can be cleared mid-edit; once bpm changes elsewhere (the slider, a
+     loaded score) the box shows the new value. Only a positive number is applied. */
+  const [bpmDraft, setBpmDraft] = useState({ text: String(settings.bpm), bpm: settings.bpm });
+  const bpmText = bpmDraft.bpm === settings.bpm ? bpmDraft.text : String(settings.bpm);
   const [state, setState] = useState<EngineState>(() => initialState(null));
   const [showTuning, setShowTuning] = useState(false);
   const [osmd, setOsmd] = useState<OSMD | null>(null);
@@ -169,33 +179,43 @@ export default function PracticeWorkspace() {
           </button>
         )}
 
-        <label className="flex items-center gap-2 text-sm">
-          <span className="text-muted">Tempo</span>
+        <div className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2">
+            <span className="text-muted">Tempo</span>
+            <input
+              type="number"
+              value={bpmText}
+              disabled={running}
+              onChange={(event) => {
+                const text = event.target.value;
+                const bpm = Number(text);
+                const valid = text.trim() !== "" && Number.isFinite(bpm) && bpm > 0;
+                setBpmDraft({ text, bpm: valid ? bpm : settings.bpm });
+                if (valid) updateSettings({ ...settings, bpm });
+              }}
+              onBlur={() => setBpmDraft({ text: String(settings.bpm), bpm: settings.bpm })}
+              className="h-9 w-20 rounded-md border border-border bg-surface px-2 text-right tabular-nums disabled:opacity-50"
+            />
+            <span className="text-muted">bpm</span>
+          </label>
           <input
-            type="number"
-            min={20}
-            max={240}
-            value={settings.bpm}
+            type="range"
+            aria-label="Tempo"
+            min={TEMPO_SLIDER_MIN}
+            max={TEMPO_SLIDER_MAX}
+            step={1}
+            value={Math.max(TEMPO_SLIDER_MIN, Math.min(TEMPO_SLIDER_MAX, settings.bpm))}
             disabled={running}
-            onChange={(event) =>
-              updateSettings({
-                ...settings,
-                bpm: Math.max(
-                  20,
-                  Math.min(240, Number(event.target.value) || 20),
-                ),
-              })
-            }
-            className="h-9 w-20 rounded-md border border-border bg-surface px-2 text-right tabular-nums disabled:opacity-50"
+            onChange={(event) => updateSettings({ ...settings, bpm: Number(event.target.value) })}
+            className="w-28 accent-foreground disabled:opacity-50 sm:w-40"
           />
-          <span className="text-muted">bpm</span>
           {timeline ? (
             <span className="hidden text-xs text-muted sm:inline">
               {timeline.beatsPerMeasure}/{timeline.beatUnit}
               {timeline.scoreBpm ? ` · score says ${timeline.scoreBpm}` : ""}
             </span>
           ) : null}
-        </label>
+        </div>
 
         <button
           type="button"
