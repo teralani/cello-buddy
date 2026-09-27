@@ -71,6 +71,14 @@ export default function PracticeWorkspace() {
     [wrist],
   );
 
+  const handleArticulation = useCallback(
+    (timestamp: number, prediction: { label: string }) => {
+      const scoreTime = engineRef.current?.scoreTimeAt(timestamp);
+      if (scoreTime !== null && scoreTime !== undefined) engineRef.current?.recordArticulation(scoreTime, prediction.label);
+    },
+    [],
+  );
+
   const handleReady = useCallback((instance: OSMD) => {
     try {
       const built = buildTimeline(instance);
@@ -284,7 +292,7 @@ export default function PracticeWorkspace() {
           aria-label="Camera"
           className="min-h-0 overflow-hidden bg-[#141311] lg:border-r lg:border-border"
         >
-          <PracticeCamera onPose={handlePose} />
+          <PracticeCamera onPose={handlePose} onArticulation={handleArticulation} />
         </section>
 
         <section
@@ -527,6 +535,11 @@ function SummaryBar({
       label: "Musical Slurs",
       value: percent(summary.slurAccuracy),
       detail: summary.slurAccuracy === null ? "no slurs" : "",
+    },
+    {
+      label: "Articulation",
+      value: percent(summary.articulationAccuracy),
+      detail: summary.articulationAccuracy === null ? "no markings" : "",
     },
     {
       label: "Tempo",

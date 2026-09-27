@@ -29,7 +29,7 @@ self.onmessage = async ({ data }: MessageEvent<WorkerInput>) => {
   if (data.type === "configure") return configure();
   if (data.type === "audio") {
     const stroke = strokeSegmenter.setAudioActive(data.active === true, data.timestamp ?? performance.now());
-    if (stroke) postMessage({ type: "articulation", articulation: articulationModel.predict(articulationFeatureVector(stroke)) });
+    if (stroke) postMessage({ type: "articulation", timestamp: data.timestamp, articulation: articulationModel.predict(articulationFeatureVector(stroke)) });
     return;
   }
   if (!pose || !data.bitmap || data.timestamp === undefined) {

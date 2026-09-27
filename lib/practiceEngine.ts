@@ -83,6 +83,7 @@ export type NoteGrade = {
   timing: { deviationMs: number | null; ok: boolean | null };
   dynamic: { expected: DynamicMark | null; played: DynamicMark | null; peakDb: number | null; ok: boolean | null };
   slur: { expected: "slurred" | "attack" | null; playedAttack: boolean | null; ok: boolean | null };
+  articulation: { expected: ScoreNote["articulation"]; played: string | null; ok: boolean | null };
 };
 
 export type SessionSummary = {
@@ -91,6 +92,7 @@ export type SessionSummary = {
   rhythmAccuracy: number | null;
   dynamicAccuracy: number | null;
   slurAccuracy: number | null;
+  articulationAccuracy: number | null;
   meanAbsCents: number | null;
   meanAbsTimingMs: number | null;
   averagePlayedBpm: number | null;
@@ -127,6 +129,7 @@ function emptyGrade(index: number, note: ScoreNote): NoteGrade {
     timing: { deviationMs: null, ok: null },
     dynamic: { expected: note.dynamic, played: null, peakDb: null, ok: null },
     slur: { expected: note.slurContinues ? "slurred" : note.slurStart ? "attack" : null, playedAttack: null, ok: null },
+    articulation: { expected: note.articulation, played: null, ok: null },
   };
 }
 
@@ -172,6 +175,7 @@ export class PracticeEngine {
   private state: EngineState;
   private frames: Frame[] = [];
   private onsets: Onset[] = [];
+  private articulations: { t: number; label: string }[] = [];
   private startTime = 0;
   private nextClickBeat = 0;
   private stableMidi: number | null = null;
@@ -199,6 +203,11 @@ export class PracticeEngine {
 
   updateSettings(settings: PracticeSettings) {
     this.settings = settings;
+  }
+
+  recordArticulation(time: number, label: string) {
+    if (this.finished || time < 0) return;
+    this.articulations.push({ t: time, label });
   }
 
   /* Seconds of score time elapsed since the count-in ended, on the audio
@@ -265,6 +274,7 @@ export class PracticeEngine {
     this.teardownAudio();
     this.frames = [];
     this.onsets = [];
+    this.articulations = [];
     this.stableMidi = null;
     this.candidateMidi = null;
     this.candidateSince = 0;
@@ -438,7 +448,7 @@ export class PracticeEngine {
     let core = this.frames.filter((frame) => frame.t >= start + margin && frame.t <= end - margin);
     if (core.length < 3) core = this.frames.filter((frame) => frame.t >= start && frame.t <= end);
     const pitched = core.filter((frame) => frame.midi !== null) as (Frame & { midi: number })[];
-    const result: NoteGrade = { ...grade, pitch: { ...grade.pitch }, timing: { ...grade.timing }, dynamic: { ...grade.dynamic }, slur: { ...grade.slur } };
+    const result: NoteGrade = { ...grade, pitch: { ...grade.pitch }, timing: { ...grade.timing }, dynamic: { ...grade.dynamic }, slur: { ...grade.slur }, articulation: { ...grade.articulation } };
 
     if (note.isRest) {
       const noisy = core.length > 0 && pitched.length / core.length > 0.5;
@@ -501,8 +511,19 @@ export class PracticeEngine {
       ok: expectedSlur === null || playedAttack === null ? null : expectedSlur === "slurred" ? !playedAttack : playedAttack,
     };
 
+    const styleEvent = note.articulation
+      ? this.articulations
+          .filter((event) => event.t >= start - 0.1 && event.t <= end + tolerance)
+          .sort((a, b) => Math.abs(a.t - start) - Math.abs(b.t - start))[0]
+      : undefined;
+    result.articulation = {
+      expected: note.articulation,
+      played: styleEvent?.label ?? null,
+      ok: note.articulation === null ? null : styleEvent ? styleEvent.label === note.articulation : false,
+    };
+
     if (result.pitch.ok === false) result.status = "bad";
-    else if (result.timing.ok === false || result.dynamic.ok === false || result.slur.ok === false) result.status = "partial";
+    else if (result.timing.ok === false || result.dynamic.ok === false || result.slur.ok === false || result.articulation.ok === false) result.status = "partial";
     else result.status = "good";
     return result;
   }
@@ -576,6 +597,7 @@ export function summarize(timeline: ScoreTimeline, grades: NoteGrade[], settings
     rhythmAccuracy: ratio(graded.map((grade) => grade.timing.ok)),
     dynamicAccuracy: ratio(graded.map((grade) => grade.dynamic.ok)),
     slurAccuracy: ratio(graded.map((grade) => grade.slur.ok)),
+    articulationAccuracy: ratio(graded.map((grade) => grade.articulation.ok)),
     meanAbsCents: meanAbs(graded.map((grade) => grade.pitch.cents)),
     meanAbsTimingMs: meanAbs(graded.map((grade) => grade.timing.deviationMs)),
     averagePlayedBpm,
