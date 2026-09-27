@@ -474,19 +474,27 @@ export class PracticeEngine {
       result.pitch = { playedMidi: null, playedName: null, cents: null, ok: false };
     }
 
+    /* Eighth notes and shorter get a lighter touch on everything but pitch:
+       at speed the mic rarely shows a clean attack or a settled dynamic, so a
+       check with no evidence is left unmeasured rather than failed. */
+    const short = note.durationBeats / this.timeline.beatUnit <= 1 / 8;
+    const heard = result.pitch.playedMidi !== null;
+
     /* Timing: the onset closest to the written start, without reaching back
-       into the previous note. */
+       into the previous note. A short note also accepts an onset anywhere
+       inside its own duration. */
     const previous = this.timeline.notes[note.index - 1];
     const previousStart = previous ? previous.startBeat * this.beatSeconds : -Infinity;
     const lower = Math.max(start - 1.5 * tolerance, previousStart + 0.05);
-    const upper = start + 1.5 * tolerance;
+    const upper = start + Math.max(1.5 * tolerance, short ? duration : 0);
     const candidates = this.onsets.filter((onset) => onset.t >= lower && onset.t <= upper);
     const onset = candidates.reduce<Onset | null>((best, candidate) => (!best || Math.abs(candidate.t - start) < Math.abs(best.t - start) ? candidate : best), null);
     if (onset) {
       const deviationMs = (onset.t - start) * 1000;
-      result.timing = { deviationMs, ok: Math.abs(deviationMs) <= settings.timingToleranceMs };
+      const allowedMs = short ? Math.max(settings.timingToleranceMs, duration * 1000) : settings.timingToleranceMs;
+      result.timing = { deviationMs, ok: Math.abs(deviationMs) <= allowedMs };
     } else {
-      result.timing = { deviationMs: null, ok: false };
+      result.timing = { deviationMs: null, ok: short && heard ? null : false };
     }
 
     /* Dynamic: the loud part of the note, mapped onto the ppp..fff ladder. */
@@ -494,21 +502,25 @@ export class PracticeEngine {
     if (audible.length > 0) {
       const peakDb = percentile(audible, 0.9);
       const played = dynamicFromDb(peakDb, settings);
-      const ok = note.dynamic ? Math.abs(DYNAMIC_MARKS.indexOf(played) - DYNAMIC_MARKS.indexOf(note.dynamic)) <= settings.dynamicToleranceSteps : null;
+      const allowedSteps = settings.dynamicToleranceSteps + (short ? 1 : 0);
+      const ok = note.dynamic ? Math.abs(DYNAMIC_MARKS.indexOf(played) - DYNAMIC_MARKS.indexOf(note.dynamic)) <= allowedSteps : null;
       result.dynamic = { expected: note.dynamic, played, peakDb, ok };
     } else {
-      result.dynamic = { expected: note.dynamic, played: null, peakDb: null, ok: note.dynamic ? false : null };
+      result.dynamic = { expected: note.dynamic, played: null, peakDb: null, ok: note.dynamic && !short ? false : null };
     }
 
     /* Slur: a note inside a slur should change pitch without a new attack;
-       the first note of a slur should get one. */
+       the first note of a slur should get one. A short note that wanted a
+       new bow but showed no attack is left unmeasured: fast détaché rarely
+       dips enough between bows for the mic to see one. */
     const attackNearby = candidates.some((candidate) => candidate.attack);
     const playedAttack = candidates.length > 0 ? attackNearby : null;
     const expectedSlur = result.slur.expected;
+    const slurOk = expectedSlur === null || playedAttack === null ? null : expectedSlur === "slurred" ? !playedAttack : playedAttack;
     result.slur = {
       expected: expectedSlur,
       playedAttack,
-      ok: expectedSlur === null || playedAttack === null ? null : expectedSlur === "slurred" ? !playedAttack : playedAttack,
+      ok: short && expectedSlur === "attack" && slurOk === false ? null : slurOk,
     };
 
     const styleEvent = note.articulation
@@ -519,7 +531,7 @@ export class PracticeEngine {
     result.articulation = {
       expected: note.articulation,
       played: styleEvent?.label ?? null,
-      ok: note.articulation === null ? null : styleEvent ? styleEvent.label === note.articulation : false,
+      ok: note.articulation === null ? null : styleEvent ? styleEvent.label === note.articulation : short ? null : false,
     };
 
     if (result.pitch.ok === false) result.status = "bad";
