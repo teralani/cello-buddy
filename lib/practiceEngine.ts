@@ -531,17 +531,13 @@ export class PracticeEngine {
     result.articulation = {
       expected: note.articulation,
       played: styleEvent?.label ?? null,
-<<<<<<< HEAD
       /* A missing stroke is inconclusive rather than a style failure. The
          classifier also treats legato and detache as the same continuous-bow
          family because the boundary between them is not reliably observable
          from a single webcam stroke. */
-      ok: note.articulation === null || !styleEvent
+      ok: note.articulation === null || !styleEvent || short
         ? null
         : articulationMatches(note.articulation, styleEvent.label),
-=======
-      ok: note.articulation === null ? null : styleEvent ? styleEvent.label === note.articulation : short ? null : false,
->>>>>>> 437c55fdc763b20b22be347467a003ea2b859266
     };
 
     if (result.pitch.ok === false) result.status = "bad";
