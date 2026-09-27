@@ -16,6 +16,15 @@ export function startSession(email: string) {
   }
 }
 
+/* Password change stub. There is nothing to check the current password
+   against yet, so this only mimics a round trip; replace the body with the
+   real auth call and throw an Error with a user-facing message on failure. */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  void currentPassword;
+  void newPassword;
+  await new Promise((resolve) => setTimeout(resolve, 400));
+}
+
 export function endSession() {
   document.cookie = `${SESSION_COOKIE}=; path=/; max-age=0; samesite=lax`;
   try {

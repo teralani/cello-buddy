@@ -1,187 +1,28 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useState } from "react";
+import {
+  ChartSection,
+  FRAME,
+  INK,
+  Legend,
+  StatTile,
+  Tooltip,
+  columnPath,
+  formatDuration,
+  labelEvery,
+  percent,
+  signed,
+  useWidth,
+} from "@/components/chart-kit";
 import IntonationHeatmap from "@/components/intonation-heatmap";
 import PanelSection from "@/components/panel-section";
 import type { MeasureMetrics, PracticeMetrics } from "@/lib/metrics";
 import { useSessionMetrics } from "@/lib/useSessionMetrics";
 
-/* Chart ink. Marks use one diverging pair (blue flat, red sharp) that clears
-   every contrast and colour-vision check against the white surface; chrome
-   reuses the app's neutral tokens so the charts sit quietly in the panel. */
-const INK = {
-  flat: "#2a78d6",
-  sharp: "#e34948",
-  neutral: "#c9c5bd",
-  track: "#cde2fb",
-  band: "#efede8",
-  grid: "#e4e1db",
-  axis: "#c9c5bd",
-  muted: "#6e6a63",
-  surface: "#ffffff",
-};
-
 /* A measure whose mean error is inside this many cents reads as in tune on the
    drift chart, matching the pitch map's colour scale above it. */
 const IN_TUNE_CENTS = 10;
-
-/* Fixed chart frame; the height already includes the x-axis band. */
-const FRAME = { height: 150, top: 10, bottom: 22, left: 36, right: 10 };
-
-/* Tracks the rendered width of a container so SVG charts can lay out in
-   pixels and keep their text at a fixed size. */
-function useWidth() {
-  const ref = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    const observer = new ResizeObserver((entries) => {
-      setWidth(Math.round(entries[0]?.contentRect.width ?? 0));
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-  return [ref, width] as const;
-}
-
-function signed(value: number, unit = "", digits = 0): string {
-  const sign = value > 0 ? "+" : value < 0 ? "−" : "";
-  return `${sign}${Math.abs(value).toFixed(digits)}${unit}`;
-}
-
-function percent(value: number | null): string {
-  return value === null ? "—" : `${Math.round(value)}%`;
-}
-
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-/* Every measure gets a label when they fit; otherwise every k-th one. */
-function labelEvery(count: number): number {
-  return count <= 16 ? 1 : Math.ceil(count / 12);
-}
-
-/* A column with a 4px rounded data end and a square foot on the baseline,
-   drawn upward or downward from `baseline` to `tip`. */
-function columnPath(x: number, baseline: number, tip: number, width: number): string {
-  const r = Math.min(4, width / 2, Math.abs(tip - baseline));
-  const dir = tip < baseline ? 1 : -1;
-  const shoulder = tip + dir * r;
-  return [
-    `M${x},${baseline}`,
-    `V${shoulder}`,
-    `Q${x},${tip} ${x + r},${tip}`,
-    `H${x + width - r}`,
-    `Q${x + width},${tip} ${x + width},${shoulder}`,
-    `V${baseline}`,
-    "Z",
-  ].join(" ");
-}
-
-type TooltipRow = [label: string, value: string];
-
-function Tooltip({ x, y = 4, width, title, rows, note }: { x: number; y?: number; width: number; title: string; rows: TooltipRow[]; note?: string }) {
-  const flip = x > width * 0.62;
-  return (
-    <div
-      role="tooltip"
-      className="pointer-events-none absolute z-10 w-max max-w-56 rounded-md border border-border bg-surface px-2.5 py-2 text-xs shadow-sm"
-      style={{ top: y, ...(flip ? { right: width - x + 10 } : { left: x + 10 }) }}
-    >
-      <p className="font-medium">{title}</p>
-      <dl className="mt-1 grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5">
-        {rows.map(([label, value]) => (
-          <Fragment key={label}>
-            <dt className="text-muted">{label}</dt>
-            <dd className="text-right font-medium tabular-nums">{value}</dd>
-          </Fragment>
-        ))}
-      </dl>
-      {note ? <p className="mt-1 text-muted">{note}</p> : null}
-    </div>
-  );
-}
-
-type Table = { columns: string[]; rows: (string | number)[][] };
-
-function DataTable({ table }: { table: Table }) {
-  return (
-    <div className="overflow-x-auto rounded-md border border-border bg-surface">
-      <table className="w-full text-xs tabular-nums">
-        <thead>
-          <tr className="bg-surface-muted text-left text-muted">
-            {table.columns.map((column) => (
-              <th key={column} className="px-2 py-1.5 font-medium">{column}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {table.rows.map((row, i) => (
-            <tr key={i} className="border-t border-border">
-              {row.map((cell, j) => (
-                <td key={j} className="px-2 py-1">{cell}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-/* A section whose chart can be swapped for its table twin. */
-function ChartSection({ eyebrow, title, table, children }: { eyebrow: string; title: string; table: Table; children: ReactNode }) {
-  const [showTable, setShowTable] = useState(false);
-  return (
-    <PanelSection
-      eyebrow={eyebrow}
-      title={title}
-      aside={
-        <button
-          type="button"
-          onClick={() => setShowTable((v) => !v)}
-          aria-pressed={showTable}
-          className="rounded-md border border-border px-2 py-1 text-[11px] uppercase tracking-wider text-muted transition-colors hover:border-border-strong hover:text-foreground"
-        >
-          {showTable ? "Chart" : "Table"}
-        </button>
-      }
-    >
-      {showTable ? <DataTable table={table} /> : children}
-    </PanelSection>
-  );
-}
-
-function Legend({ items }: { items: { color: string; label: string; line?: boolean }[] }) {
-  return (
-    <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-      {items.map((item) => (
-        <li key={item.label} className="flex items-center gap-1.5">
-          <span
-            aria-hidden
-            className={item.line ? "h-0.5 w-4 rounded-full" : "h-2.5 w-2.5 rounded-sm"}
-            style={{ background: item.color }}
-          />
-          {item.label}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function StatTile({ label, value, detail }: { label: string; value: string; detail?: string }) {
-  return (
-    <div className="rounded-md border border-border bg-surface px-3 py-2.5">
-      <p className="text-[11px] text-muted">{label}</p>
-      <p className="mt-0.5 text-2xl font-semibold tracking-tight">{value}</p>
-      {detail ? <p className="text-[11px] text-muted">{detail}</p> : null}
-    </div>
-  );
-}
 
 /* The measure with the lowest combined pitch and timing accuracy: the one
    place to drill next. null when no measure has a score on either axis. */
