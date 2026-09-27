@@ -199,6 +199,11 @@ function StatTiles({ metrics }: { metrics: PracticeMetrics }) {
         detail={summary.meanAbsTimingMs === null ? "No onsets heard" : `avg ${summary.meanAbsTimingMs} ms off`}
       />
       <StatTile
+        label="Articulation"
+        value={percent(summary.articulationAccuracyPct)}
+        detail={summary.articulationAccuracyPct === null ? "No style markings" : "Marked notes matched"}
+      />
+      <StatTile
         label="Tempo"
         value={tempo.averagePlayed === null ? "—" : `${Math.round(tempo.averagePlayed)} bpm`}
         detail={tempoDelta === null ? `target ${tempo.target} bpm` : `${signed(tempoDelta)} vs ${tempo.target} target`}
@@ -479,8 +484,43 @@ function radarAxes(metrics: PracticeMetrics): RadarAxis[] {
     },
     { label: "Bow", value: share === null ? null : Math.round(share * 100), basis: "Share of bow-arm travel that was sideways" },
     { label: "Slurs", value: summary.slurAccuracyPct, basis: "Slurred notes kept in one bow" },
+    { label: "Articulation", value: summary.articulationAccuracyPct, basis: "Explicit style markings matched" },
     { label: "Dynamics", value: summary.dynamicAccuracyPct, basis: "Notes played at the marked dynamic" },
   ];
+}
+
+function ArticulationChart({ measures }: { measures: MeasureMetrics[] }) {
+  const [ref, width] = useWidth();
+  const plotWidth = Math.max(0, width - FRAME.left - FRAME.right);
+  const slot = measures.length ? plotWidth / measures.length : 0;
+  const barWidth = Math.max(4, Math.min(24, slot - 2));
+  const every = labelEvery(measures.length);
+  return (
+    <div ref={ref} className="relative" style={{ height: FRAME.height }}>
+      {width > 0 ? (
+        <svg width={width} height={FRAME.height} role="img" aria-label="Articulation accuracy per measure">
+          {[0, 50, 100].map((value) => {
+            const y = FRAME.top + (100 - value) / 100 * (FRAME.height - FRAME.top - FRAME.bottom);
+            return <line key={value} x1={FRAME.left} x2={FRAME.left + plotWidth} y1={y} y2={y} stroke={INK.grid} />;
+          })}
+          {measures.map((measure, index) => {
+            const value = measure.articulation.accuracyPct;
+            const x = FRAME.left + index * slot + (slot - barWidth) / 2;
+            const baseline = FRAME.height - FRAME.bottom;
+            const y = value === null ? baseline : baseline - (value / 100) * (baseline - FRAME.top);
+            return (
+              <Fragment key={measure.number}>
+                <rect x={x} y={y} width={barWidth} height={Math.max(0, baseline - y)} rx={2} fill={value === null ? INK.neutral : INK.flat} />
+                {index % every === 0 ? <text x={x + barWidth / 2} y={baseline + 16} textAnchor="middle" fill={INK.muted} fontSize="10">{measure.number}</text> : null}
+              </Fragment>
+            );
+          })}
+          <text x={FRAME.left - 6} y={FRAME.top + 4} textAnchor="end" fill={INK.muted} fontSize="10">100</text>
+          <text x={FRAME.left - 6} y={FRAME.height - FRAME.bottom + 4} textAnchor="end" fill={INK.muted} fontSize="10">0</text>
+        </svg>
+      ) : null}
+    </div>
+  );
 }
 
 /* A spider map over every area the session measured. Missing areas are left
@@ -655,6 +695,18 @@ export default function SessionInsights() {
                 { color: INK.axis, label: `Target ${metrics.tempo.target} bpm`, line: true },
               ]}
             />
+          </ChartSection>
+
+          <ChartSection
+            eyebrow="By measure"
+            title="Articulation"
+            table={{
+              columns: ["Measure", "Accuracy", "Checked"],
+              rows: measures.map((m) => [m.number, percent(m.articulation.accuracyPct), m.articulation.checked]),
+            }}
+          >
+            <ArticulationChart measures={measures} />
+            <Legend items={[{ color: INK.flat, label: "Marked notes matched" }, { color: INK.neutral, label: "No style marking" }]} />
           </ChartSection>
 
           <PanelSection eyebrow="Camera" title="Bow path">

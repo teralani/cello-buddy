@@ -53,7 +53,13 @@ function describe(note: ScoreNote, grade: NoteGrade) {
     lines.push(grade.slur.ok ? (grade.slur.expected === "slurred" ? "Slurred" : "New bow") : grade.slur.expected === "slurred" ? "New bow where a slur was written ✗" : "Slurred into a note that wanted a new bow ✗");
   }
   if (grade.articulation.expected) {
-    lines.push(grade.articulation.ok ? `Style ${grade.articulation.played}` : `Wanted ${grade.articulation.expected}, heard ${grade.articulation.played ?? "nothing"} ✗`);
+    lines.push(
+      grade.articulation.ok === true
+        ? `Style ${grade.articulation.played}`
+        : grade.articulation.ok === false
+          ? `Wanted ${grade.articulation.expected}, heard ${grade.articulation.played ?? "nothing"} ✗`
+          : "Style not measured",
+    );
   }
   return lines.join("\n");
 }

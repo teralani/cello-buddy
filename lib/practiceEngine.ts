@@ -519,7 +519,13 @@ export class PracticeEngine {
     result.articulation = {
       expected: note.articulation,
       played: styleEvent?.label ?? null,
-      ok: note.articulation === null ? null : styleEvent ? styleEvent.label === note.articulation : false,
+      /* A missing stroke is inconclusive rather than a style failure. The
+         classifier also treats legato and detache as the same continuous-bow
+         family because the boundary between them is not reliably observable
+         from a single webcam stroke. */
+      ok: note.articulation === null || !styleEvent
+        ? null
+        : articulationMatches(note.articulation, styleEvent.label),
     };
 
     if (result.pitch.ok === false) result.status = "bad";
@@ -547,6 +553,12 @@ export class PracticeEngine {
 function ratio(values: (boolean | null)[]) {
   const graded = values.filter((value): value is boolean => value !== null);
   return graded.length ? graded.filter(Boolean).length / graded.length : null;
+}
+
+function articulationMatches(expected: NonNullable<ScoreNote["articulation"]>, played: string) {
+  if (expected === "staccato") return played === "staccato";
+  if (expected === "legato" || expected === "detache") return played === "legato" || played === "detache";
+  return false;
 }
 
 function meanAbs(values: (number | null)[]) {
@@ -659,6 +671,10 @@ export function toPracticeMetrics(
           playedBpm: playedTempo(timeline, measureGrades, settings.bpm, 2),
           unheard: measureGrades.length - timings.length,
         },
+        articulation: {
+          accuracyPct: percent(measureGrades.map((grade) => grade.articulation.ok)),
+          checked: measureGrades.filter((grade) => grade.articulation.ok !== null).length,
+        },
         bow: analyzeBowMotion(wrist, span.start, span.end),
       };
     });
@@ -678,6 +694,7 @@ export function toPracticeMetrics(
       meanAbsTimingMs: rounded(summary.meanAbsTimingMs),
       dynamicAccuracyPct: summary.dynamicAccuracy === null ? null : Math.round(summary.dynamicAccuracy * 100),
       slurAccuracyPct: summary.slurAccuracy === null ? null : Math.round(summary.slurAccuracy * 100),
+      articulationAccuracyPct: summary.articulationAccuracy === null ? null : Math.round(summary.articulationAccuracy * 100),
       bow: analyzeBowMotion(wrist, 0, timeline.totalBeats * beatSeconds),
     },
     measures,

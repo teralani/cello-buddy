@@ -56,6 +56,12 @@ export type MeasureMetrics = {
     /* Notes with no onset found near the written beat. */
     unheard: number;
   };
+  articulation: {
+    /* Percentage of explicitly marked notes matching the detected style. */
+    accuracyPct: number | null;
+    /* Number of notes in this measure that carried a supported style mark. */
+    checked: number;
+  };
   /* null when the camera did not see the right wrist during this measure. */
   bow: BowMotionMetrics | null;
 };
@@ -82,6 +88,7 @@ export type PracticeMetrics = {
     /* Only graded where the score carries dynamics or slurs. */
     dynamicAccuracyPct: number | null;
     slurAccuracyPct: number | null;
+    articulationAccuracyPct: number | null;
     /* Right wrist motion over the whole play-through. */
     bow: BowMotionMetrics | null;
   };
@@ -99,13 +106,17 @@ export function isPracticeMetrics(value: unknown): value is PracticeMetrics {
     isRecord(value.tempo) &&
     typeof value.tempo.target === "number" &&
     isRecord(value.summary) &&
+    (typeof value.summary.articulationAccuracyPct === "number" || value.summary.articulationAccuracyPct === null) &&
     Array.isArray(value.measures) &&
     value.measures.every(
       (measure) =>
         isRecord(measure) &&
         typeof measure.number === "number" &&
         isRecord(measure.pitch) &&
-        isRecord(measure.timing),
+        isRecord(measure.timing) &&
+        isRecord(measure.articulation) &&
+        (typeof measure.articulation.accuracyPct === "number" || measure.articulation.accuracyPct === null) &&
+        typeof measure.articulation.checked === "number",
     )
   );
 }
