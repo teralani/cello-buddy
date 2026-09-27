@@ -462,23 +462,14 @@ function BowPath({ metrics }: { metrics: PracticeMetrics }) {
    `value` is null when the session did not measure that area. */
 type RadarAxis = { label: string; value: number | null; basis: string };
 
-/* Bpm off target per point lost on the tempo spoke: 5 bpm off scores 80. */
-const TEMPO_POINTS_PER_BPM = 4;
-
 function radarAxes(metrics: PracticeMetrics): RadarAxis[] {
-  const { summary, tempo } = metrics;
-  const tempoOff = tempo.averagePlayed === null ? null : Math.round(tempo.averagePlayed - tempo.target);
+  const { summary } = metrics;
   const share = summary.bow?.horizontalShare ?? null;
   return [
     { label: "Pitch", value: summary.pitchAccuracyPct, basis: "Notes within the pitch tolerance" },
     { label: "Rhythm", value: summary.timingAccuracyPct, basis: "Onsets within the timing tolerance" },
-    {
-      label: "Tempo",
-      value: tempoOff === null ? null : Math.max(0, 100 - Math.abs(tempoOff) * TEMPO_POINTS_PER_BPM),
-      basis: tempoOff === null ? "Tempo not measured" : `Averaged ${signed(tempoOff, " bpm")} from the ${tempo.target} bpm target`,
-    },
     { label: "Bow", value: share === null ? null : Math.round(share * 100), basis: "Share of bow-arm travel that was sideways" },
-    { label: "Slurs", value: summary.slurAccuracyPct, basis: "Slurred notes kept in one bow" },
+    { label: "Musical Slurs", value: summary.slurAccuracyPct, basis: "Slurred notes kept in one bow" },
     { label: "Dynamics", value: summary.dynamicAccuracyPct, basis: "Notes played at the marked dynamic" },
   ];
 }
