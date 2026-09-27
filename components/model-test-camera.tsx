@@ -1,7 +1,7 @@
 "use client";
 
 import { startTransition, useEffect, useRef, useState } from "react";
-import { angleDelta, bowAngle, detectDualTapePoints, type DualTapePoints, type TapeColor } from "@/lib/bowVision";
+import { angleDelta, bowAngle, bowPosition, detectDualTapePoints, type DualTapePoints, type TapeColor } from "@/lib/bowVision";
 import { rmsOf } from "@/lib/audioPitch";
 
 type Prediction = { label: string; probabilities: Record<string, number> } | null;
@@ -27,6 +27,7 @@ export default function ModelTestCamera() {
   const [baselineAngle, setBaselineAngle] = useState<number | null>(null);
   const [angle, setAngle] = useState<number | null>(null);
   const [bowX, setBowX] = useState<number | null>(null);
+  const [bowPositionValue, setBowPositionValue] = useState<number | null>(null);
   const [articulation, setArticulation] = useState<Prediction>(null);
   const [strokeCount, setStrokeCount] = useState(0);
   const [audioActive, setAudioActive] = useState(false);
@@ -148,6 +149,12 @@ export default function ModelTestCamera() {
           };
           missedTapeFramesRef.current = 0;
           tapePointsRef.current = detected;
+          const midpoint = {
+            x: (detected.first.x + detected.second.x) / 2,
+            y: (detected.first.y + detected.second.y) / 2,
+            size: 0,
+          };
+          setBowPositionValue(bowPosition(midpoint, height));
           const rawAngle = bowAngle(detected.first, detected.second);
           if (smoothedAngleRef.current === null) {
             smoothedAngleRef.current = rawAngle;
@@ -166,6 +173,7 @@ export default function ModelTestCamera() {
             tapePointsRef.current = null;
             smoothedAngleRef.current = null;
             setAngle(null);
+            setBowPositionValue(null);
           }
         }
       }
@@ -212,6 +220,7 @@ export default function ModelTestCamera() {
           <div><span className="text-ink-soft">Right bow hand X</span><strong className="mt-1 block font-display text-3xl text-butter">{bowX === null ? "--" : bowX.toFixed(3)} m</strong></div>
           <div><span className="text-ink-soft">Bow alignment</span><strong className="mt-1 block font-display text-3xl text-butter">{angle === null ? "--" : `${angle.toFixed(1)} deg`}</strong></div>
           <div><span className="text-ink-soft">Audio gate / strokes</span><strong className="mt-1 block font-display text-3xl text-butter">{audioActive ? "ON" : "OFF"} / {strokeCount}</strong></div>
+          <div><span className="text-ink-soft">Bow position</span><strong className="mt-1 block font-display text-3xl text-butter">{bowPositionValue === null ? "--" : bowPositionValue.toFixed(3)}</strong></div>
         </div>
         <div className="mt-4 border-t-2 border-screen-edge pt-4">
           <span className="text-xs uppercase tracking-widest text-ink-soft">Detected articulation</span>

@@ -141,7 +141,7 @@ export function angleDelta(current: number, baseline: number) {
   return delta;
 }
 
-export function bowPlacement(midpoint: TapePoint, bridgeY: number | null, fingerboardY: number | null) {
-  if (bridgeY === null || fingerboardY === null) return "uncalibrated";
-  return Math.abs(midpoint.y - bridgeY) <= Math.abs(midpoint.y - fingerboardY) ? "bridge side" : "fingerboard side";
+export function bowPosition(midpoint: TapePoint, frameHeight: number) {
+  if (frameHeight <= 0) return null;
+  return Math.max(0, Math.min(1, midpoint.y / frameHeight));
 }

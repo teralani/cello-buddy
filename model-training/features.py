@@ -1,22 +1,5 @@
 """Feature parity helpers for the offline posture and articulation models."""
-import math
-
-
-ARTICULATION_FEATURE_COLUMNS = [
-    "duration_ms",
-    "mean_speed",
-    "median_speed",
-    "max_speed",
-    "speed_variance",
-    "speed_p90",
-    "mean_acceleration",
-    "max_acceleration",
-    "acceleration_variance",
-    "peak_speed_position",
-    "movement_distance",
-    "direction",
-]
-
+ 
 
 def _angle(first, vertex, last):
     first_vector = [first[i] - vertex[i] for i in range(3)]
