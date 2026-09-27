@@ -23,6 +23,34 @@ VOYAGE_API_KEY=pa-...
 - `ANTHROPIC_API_KEY` powers the feedback chatbot. Without it the chat page shows an error instead of a review.
 - `VOYAGE_API_KEY` is used for embeddings. It is needed to build the lesson index and, at runtime, to embed each question for retrieval. Without it the chatbot still works but does not suggest video clips.
 
+## Backend API
+
+The sign-in and registration routes under `app/api/auth/` are served by the FastAPI app in `api/`, which stores users in PostgreSQL.
+
+Set `SQL_DB_URL` in the repo-root `.env.local` to the PostgreSQL connection URL from TigerData. The API also accepts `DATABASE_URL`. PostgreSQL connections use psycopg 3 and require TLS by default; an explicit `sslmode` in the URL is preserved.
+
+```text
+SQL_DB_URL=postgresql://USER:PASSWORD@HOST:PORT/DATABASE?sslmode=require
+```
+
+Install and run the API from the repo root:
+
+```bash
+python -m pip install -r api/requirements.txt
+uvicorn api.main:app --reload
+```
+
+The database must already contain the `users`, `practice_session`, and `connection` tables expected by the API models.
+
+### How the frontend reaches the API
+
+The Next.js auth routes call the backend through the app's own origin at `/api/py/...`, so no extra configuration is needed in either environment:
+
+- In `next dev`, `/api/py/*` is proxied to the local uvicorn at `http://127.0.0.1:8000`.
+- On Vercel, `api/main.py` is deployed as a Python serverless function at `/api/main`, and `/api/py/*` is rewritten to it. The FastAPI app strips the `/api/py` prefix itself, so the same routes work in both places. `SQL_DB_URL` (or `DATABASE_URL`) must be set in the Vercel project's environment variables.
+
+To use a backend hosted somewhere else instead, set `API_BASE_URL` to its origin (for example `API_BASE_URL=https://api.example.com`) and the auth routes will call it directly.
+
 ## Practice session
 
 The practice screen renders the score with OpenSheetMusicDisplay and grades a play-through against it.

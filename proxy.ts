@@ -1,8 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE } from "@/lib/session";
 
-/* Gate every page behind the login screen until a session cookie exists.
-   This is a UI-only check for now; there is no server-side verification. */
+/* Keep app pages behind sign-in; auth handlers set and clear this token cookie. */
 export function proxy(request: NextRequest) {
   const signedIn = request.cookies.has(SESSION_COOKIE);
   const { pathname } = request.nextUrl;

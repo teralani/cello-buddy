@@ -1,7 +1,3 @@
-/* Client-side session stub. There is no backend yet: "logging in" just sets
-   a cookie that the proxy checks, and signing out clears it. Swap these for
-   real auth calls later without touching the UI. */
-
 export const SESSION_COOKIE = "cello-buddy-session";
 export const SESSION_EMAIL_KEY = "cello-buddy:session-email";
 

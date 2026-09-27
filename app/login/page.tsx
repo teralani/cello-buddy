@@ -13,7 +13,7 @@ export default function LoginPage() {
           Cello Buddy
         </h1>
         <p className="mt-4 text-base leading-relaxed text-muted">
-          Sign in to load a score and start practicing.
+          Sign in or create an account to start practicing.
         </p>
 
         <div className="mt-10">
