@@ -6,6 +6,8 @@ from api.database import engine, Base
 from api.auth import router
 from api.api_groups.user_api import user_router
 from api.api_groups.practice_session_api import practice_session_router
+from api.api_groups.connection_api import connection_router
+
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -24,7 +26,7 @@ app.add_middleware(
 app.include_router(router)
 app.include_router(user_router)
 app.include_router(practice_session_router)
-
+app.include_router(connection_router)
 
 
 if __name__ == "__main__":

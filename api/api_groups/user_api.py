@@ -11,7 +11,7 @@ from api.auth import bcrypt_context
 
 user_dep = Annotated[dict, Depends(get_current_user)]
 
-user_router = APIRouter(prefix="/users", tags=["Users"])
+user_router = APIRouter(prefix="/user", tags=["User"])
 
 
 @user_router.get("/get-user/{id}/", status_code=status.HTTP_200_OK)
