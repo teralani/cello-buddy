@@ -1,10 +1,13 @@
 import type { PracticeMetrics } from "@/lib/metrics";
+import { fetchSessions, type ApiSession } from "@/lib/practiceApi";
 
 /* One stored play-through: the summary of a PracticeMetrics record without
-   its per-measure detail. This is the row the future database will hold per
-   session, and the home dashboard is built entirely from a list of them.
-   Every field maps to something the practice screen measures (lib/metrics.ts);
-   a value the session could not measure stays null. */
+   its per-measure detail. The home dashboard is built entirely from a list
+   of them. Every field maps to something the practice screen measures
+   (lib/metrics.ts); a value the session could not measure stays null.
+
+   The backend stores only some of these per session (see fromApiSession);
+   the rest are filled with fixed placeholder values on live rows. */
 export type PracticeHistoryEntry = {
   id: string;
   piece: string;
@@ -26,7 +29,15 @@ export type PracticeHistoryEntry = {
   dynamicAccuracyPct: number | null;
   /* Share of right-wrist travel that was sideways, 0 to 1. */
   bowHorizontalShare: number | null;
+  /* The backend's weighted score for the session, 0 to 100. */
+  finalScorePct: number | null;
 };
+
+/* The backend's final score: pitch 40%, bow 35%, articulation 25%, each
+   scored 0 to 1, with an unmeasured part counting as 0 (api/api_groups). */
+export function finalScore(pitchPct: number | null, bowShare: number | null, articulationPct: number | null): number {
+  return ((pitchPct ?? 0) / 100) * 40 + (bowShare ?? 0) * 35 + ((articulationPct ?? 0) / 100) * 25;
+}
 
 /* Flattens a finished session into its history row. The database write path
    should call this so stored rows and live metrics never drift apart. */
@@ -51,14 +62,54 @@ export function toHistoryEntry(metrics: PracticeMetrics, id: string): PracticeHi
     slurAccuracyPct: summary.slurAccuracyPct,
     dynamicAccuracyPct: summary.dynamicAccuracyPct,
     bowHorizontalShare: summary.bow?.horizontalShare ?? null,
+    finalScorePct: finalScore(summary.pitchAccuracyPct, summary.bow?.horizontalShare ?? null, summary.articulationAccuracyPct),
   };
 }
 
-/* ---------- Filler data ----------
-   There is no database yet. fetchPracticeHistory resolves to a fixed set of
-   sample sessions laid out over the four weeks before `now`, so the dashboard
-   always has a populated "this week". Swap its body for a real query later;
-   the dashboard only depends on the returned rows. */
+/* ---------- Live rows ----------
+   The backend keeps four measurements per session: pitch accuracy, bow
+   share, articulation accuracy, and the score built from them, plus when it
+   was recorded. Everything else the dashboard shows is not stored yet, so
+   those fields take these fixed values on every live row. They are constants
+   on purpose: nothing here is estimated from the stored numbers. */
+export const PLACEHOLDER_PIECE = "Practice session";
+
+const PLACEHOLDERS = {
+  piece: PLACEHOLDER_PIECE,
+  durationSeconds: 5 * 60,
+  completed: true,
+  measuresPlayed: 32,
+  measuresInPiece: 32,
+  tempoTarget: 60,
+  tempoPlayed: 60,
+  gradedNotes: 120,
+  meanAbsCents: 20,
+  timingAccuracyPct: 70,
+  meanAbsTimingMs: 120,
+  slurAccuracyPct: null,
+  dynamicAccuracyPct: null,
+} as const;
+
+/* Which dashboard figures are placeholders on live rows, for the UI to say so. */
+export const PLACEHOLDER_NOTE =
+  "Pitch, bow, articulation and score are from your recorded sessions. Piece, length, measures, tempo, notes, cents and timing are fixed placeholders until the backend stores them.";
+
+export function fromApiSession(session: ApiSession): PracticeHistoryEntry {
+  return {
+    id: session.id,
+    recordedAt: session.recordedAt,
+    pitchAccuracyPct: session.pitchAccuracyPct,
+    articulationAccuracyPct: session.articulationAccuracyPct,
+    bowHorizontalShare: session.bowHorizontalShare,
+    finalScorePct: session.finalScorePct,
+    ...PLACEHOLDERS,
+  };
+}
+
+/* ---------- Sample data ----------
+   Used only when the backend cannot be reached (for example `next dev`
+   without uvicorn running): a fixed set of sample sessions laid out over the
+   four weeks before `now`, so the dashboard still has something to show. */
 
 type SamplePiece = { name: string; measures: number; tempo: number; notesPerMeasure: number; marked: boolean };
 
@@ -138,14 +189,28 @@ export function buildSampleHistory(now: Date): PracticeHistoryEntry[] {
       slurAccuracyPct: slur,
       dynamicAccuracyPct: piece.marked ? dynamics : null,
       bowHorizontalShare: bowShare,
+      finalScorePct: finalScore(pitch, bowShare, piece.marked ? articulation : null),
     };
   });
 }
 
-/* Newest first, like a database query ordered by recordedAt would return. */
-export function fetchPracticeHistory(now = new Date()): Promise<PracticeHistoryEntry[]> {
-  const rows = buildSampleHistory(now).sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
-  return Promise.resolve(rows);
+export type PracticeHistory = {
+  /* Newest first. */
+  history: PracticeHistoryEntry[];
+  /* "live" rows come from the backend; "sample" rows are the fallback above. */
+  source: "live" | "sample";
+};
+
+/* The signed-in user's sessions from the backend, newest first. Falls back
+   to the sample rows only when the backend cannot be reached; a user with no
+   sessions yet gets an empty live history. */
+export async function fetchPracticeHistory(now = new Date()): Promise<PracticeHistory> {
+  const sessions = await fetchSessions();
+  if (sessions === null) {
+    const history = buildSampleHistory(now).sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
+    return { history, source: "sample" };
+  }
+  return { history: sessions.map(fromApiSession), source: "live" };
 }
 
 /* ---------- Names ---------- */
@@ -340,6 +405,8 @@ export function personalBests(history: PracticeHistoryEntry[], now: Date): Perso
   if (timing) bests.push({ label: "Best timing", value: `${Math.round(timing.timingAccuracyPct!)}%`, detail: briefPiece(timing.piece), recordedAt: timing.recordedAt });
   const cents = pick((e) => e.meanAbsCents, false);
   if (cents) bests.push({ label: "Closest to pitch", value: `${Math.round(cents.meanAbsCents!)}¢ off`, detail: briefPiece(cents.piece), recordedAt: cents.recordedAt });
+  const score = pick((e) => e.finalScorePct, true);
+  if (score) bests.push({ label: "Best score", value: `${Math.round(score.finalScorePct!)}`, detail: briefPiece(score.piece), recordedAt: score.recordedAt });
   const longest = pick((e) => e.durationSeconds, true);
   if (longest) {
     const m = Math.floor(longest.durationSeconds / 60);

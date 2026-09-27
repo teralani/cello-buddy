@@ -19,7 +19,10 @@ import {
 import Milestones from "@/components/milestones";
 import PanelSection from "@/components/panel-section";
 import { milestones } from "@/lib/milestones";
+import { fetchLeaderboard, type LeaderboardEntry } from "@/lib/practiceApi";
 import {
+  PLACEHOLDER_NOTE,
+  PLACEHOLDER_PIECE,
   daysSince,
   fetchPracticeHistory,
   meanOf,
@@ -31,9 +34,10 @@ import {
   totalMinutes,
   weeklyCalendar,
   type DayTotal,
+  type PracticeHistory,
   type PracticeHistoryEntry,
 } from "@/lib/practiceHistory";
-import { useSessionEmail } from "@/lib/useSessionEmail";
+import { displayName, useCurrentUser } from "@/lib/useCurrentUser";
 
 const TREND_SESSIONS = 12;
 const CALENDAR_WEEKS = 12;
@@ -65,13 +69,6 @@ function delta(current: number | null, previous: number | null, unit: string, pe
 
 /* ---------- Greeting ---------- */
 
-/* The part of an email before the @, if it looks like a name. */
-function nameFromEmail(email: string | null): string | null {
-  const local = email?.split("@")[0]?.split(/[._\-+0-9]/)[0] ?? "";
-  if (local.length < 2 || local.length > 14 || !/^[a-z]+$/i.test(local)) return null;
-  return local.charAt(0).toUpperCase() + local.slice(1).toLowerCase();
-}
-
 /* One or two sentences picked from what the history actually says. */
 function greetingLine(history: PracticeHistoryEntry[], now: Date): string {
   const parts: string[] = [];
@@ -84,9 +81,11 @@ function greetingLine(history: PracticeHistoryEntry[], now: Date): string {
     parts.push(`New ${newBest.label.toLowerCase()} this week: ${newBest.value} on ${shortPiece(newBest.detail)}.`);
   } else if (latest && daysSince(latest.recordedAt, now) >= 2) {
     const gap = daysSince(latest.recordedAt, now);
-    parts.push(`It has been ${gap} days since your last session. ${shortPiece(latest.piece)} is waiting.`);
+    const waiting = latest.piece === PLACEHOLDER_PIECE ? "Your cello" : shortPiece(latest.piece);
+    parts.push(`It has been ${gap} days since your last session. ${waiting} is waiting.`);
   } else if (latest) {
-    parts.push(`Last time: ${shortPiece(latest.piece)}, ${percent(latest.pitchAccuracyPct)} in tune.`);
+    const what = latest.piece === PLACEHOLDER_PIECE ? "" : `${shortPiece(latest.piece)}, `;
+    parts.push(`Last time: ${what}${percent(latest.pitchAccuracyPct)} in tune.`);
   } else {
     parts.push("Load a score and the numbers start here.");
   }
@@ -94,8 +93,7 @@ function greetingLine(history: PracticeHistoryEntry[], now: Date): string {
 }
 
 function Greeting({ history, now }: { history: PracticeHistoryEntry[]; now: Date }) {
-  const email = useSessionEmail();
-  const name = nameFromEmail(email);
+  const name = displayName(useCurrentUser());
   const hour = now.getHours();
   const timeOfDay = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
   return (
@@ -521,25 +519,67 @@ function RecentSessions({ history }: { history: PracticeHistoryEntry[] }) {
     percent(entry.pitchAccuracyPct),
     percent(entry.timingAccuracyPct),
     percent(entry.articulationAccuracyPct),
+    entry.bowHorizontalShare === null ? "—" : `${Math.round(entry.bowHorizontalShare * 100)}%`,
+    entry.finalScorePct === null ? "—" : `${Math.round(entry.finalScorePct)}`,
     entry.tempoPlayed === null ? `— / ${entry.tempoTarget}` : `${Math.round(entry.tempoPlayed)} / ${entry.tempoTarget}`,
   ]);
-  return <DataTable table={{ columns: ["Date", "Piece", "Length", "Measures", "Pitch", "Timing", "Articulation", "Tempo (bpm)"], rows }} />;
+  return (
+    <DataTable
+      table={{ columns: ["Date", "Piece", "Length", "Measures", "Pitch", "Timing", "Articulation", "Bow", "Score", "Tempo (bpm)"], rows }}
+    />
+  );
+}
+
+/* ---------- Leaderboard ---------- */
+
+/* The best score of every player on the backend, top few. Loads on its own
+   so a slow lookup never holds up the rest of the dashboard; renders nothing
+   until there is a list to show. */
+function Leaderboard() {
+  const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchLeaderboard().then((result) => {
+      if (!cancelled) setEntries(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (!entries || entries.length === 0) return null;
+  return (
+    <PanelSection eyebrow="Community" title="Leaderboard" aside="Best score per player">
+      <ol className="divide-y divide-border rounded-md border border-border bg-surface">
+        {entries.map((entry, i) => (
+          <li
+            key={entry.userId}
+            className={`chart-fade flex items-center gap-3 px-3 py-2.5 text-sm ${entry.you ? "font-medium" : ""}`}
+            style={{ animationDelay: `${i * 50}ms` }}
+          >
+            <span className="w-5 text-right text-muted tabular-nums">{i + 1}</span>
+            <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+            <span className="tabular-nums">{Math.round(entry.scorePct)}</span>
+          </li>
+        ))}
+      </ol>
+    </PanelSection>
+  );
 }
 
 /* ---------- Dashboard ---------- */
 
 /* The home-page dashboard: a greeting, headline stats, trends, bests,
    milestones, and past sessions, all built from the stored history rows.
-   History loads after mount, the way a database fetch will, so the server
-   render never disagrees with the client's clock. */
+   History loads after mount, from the backend, so the server render never
+   disagrees with the client's clock. */
 export default function PracticeDashboard() {
-  const [state, setState] = useState<{ history: PracticeHistoryEntry[]; now: Date } | null>(null);
+  const [state, setState] = useState<(PracticeHistory & { now: Date }) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const now = new Date();
-    fetchPracticeHistory(now).then((history) => {
-      if (!cancelled) setState({ history, now });
+    fetchPracticeHistory(now).then((result) => {
+      if (!cancelled) setState({ ...result, now });
     });
     return () => {
       cancelled = true;
@@ -560,7 +600,8 @@ export default function PracticeDashboard() {
     );
   }
 
-  const { history, now } = state;
+  const { history, source, now } = state;
+  const live = source === "live";
   const trend = history.slice(0, TREND_SESSIONS).reverse();
   const weeks = weeklyCalendar(history, now, CALENDAR_WEEKS);
   const playedDaysInCalendar = weeks.flat().filter((d): d is DayTotal => d !== null && d.sessions > 0);
@@ -572,8 +613,19 @@ export default function PracticeDashboard() {
       <PanelSection
         eyebrow="Progress"
         title="Your practice"
-        aside={<span title="A real database is coming; until then these are sample sessions.">Sample data</span>}
+        aside={
+          live ? (
+            <span title={PLACEHOLDER_NOTE}>Live data · some figures fixed</span>
+          ) : (
+            <span title="The backend could not be reached, so these are sample sessions.">Sample data</span>
+          )
+        }
       >
+        {live && history.length === 0 ? (
+          <p className="text-sm leading-relaxed text-muted">
+            No sessions recorded yet. Finish a play-through and it lands here.
+          </p>
+        ) : null}
         <StatTiles history={history} now={now} />
       </PanelSection>
 
@@ -589,7 +641,7 @@ export default function PracticeDashboard() {
         <Legend
           items={[
             { color: INK.flat, label: "Pitch: notes within tolerance", line: true },
-            { color: INK.second, label: "Timing: onsets within tolerance", line: true },
+            { color: INK.second, label: live ? "Timing: fixed placeholder, not stored yet" : "Timing: onsets within tolerance", line: true },
           ]}
         />
       </ChartSection>
@@ -620,6 +672,8 @@ export default function PracticeDashboard() {
       <PanelSection eyebrow="Records" title="Milestones">
         <Milestones items={milestones(history, now)} />
       </PanelSection>
+
+      <Leaderboard />
 
       <PanelSection eyebrow="History" title="Pieces">
         <PieceList history={history} now={now} />

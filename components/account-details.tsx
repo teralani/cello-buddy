@@ -1,8 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { daysSince, fetchPracticeHistory, longestStreak, totalMinutes, totalNotes, type PracticeHistoryEntry } from "@/lib/practiceHistory";
-import { useSessionEmail } from "@/lib/useSessionEmail";
+import {
+  PLACEHOLDER_NOTE,
+  daysSince,
+  fetchPracticeHistory,
+  longestStreak,
+  totalMinutes,
+  totalNotes,
+  type PracticeHistory,
+} from "@/lib/practiceHistory";
+import { displayName, useCurrentUser } from "@/lib/useCurrentUser";
 
 function longDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
@@ -14,18 +22,19 @@ function hoursAndMinutes(minutes: number): string {
   return h === 0 ? `${m} min` : `${h} h ${m} min`;
 }
 
-/* The signed-in email plus practice totals from the stored history. The
-   email is real; the totals come from the same sample rows as the dashboard
-   until there is a database. */
+/* The signed-in user's name and email from the backend, plus practice totals
+   from their stored sessions. Totals that the backend does not record yet
+   (practice time, notes, pieces) are built from fixed per-session
+   placeholders; see lib/practiceHistory.ts. */
 export default function AccountDetails() {
-  const email = useSessionEmail();
-  const [state, setState] = useState<{ history: PracticeHistoryEntry[]; now: Date } | null>(null);
+  const user = useCurrentUser();
+  const [state, setState] = useState<(PracticeHistory & { now: Date }) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const now = new Date();
-    fetchPracticeHistory(now).then((history) => {
-      if (!cancelled) setState({ history, now });
+    fetchPracticeHistory(now).then((result) => {
+      if (!cancelled) setState({ ...result, now });
     });
     return () => {
       cancelled = true;
@@ -37,10 +46,13 @@ export default function AccountDetails() {
   const daysIn = first && state ? daysSince(first.recordedAt, state.now) + 1 : null;
   const pieces = history ? new Set(history.map((e) => e.piece)).size : null;
   const streak = history && state ? longestStreak(history, state.now) : null;
-  const initial = email?.trim().charAt(0).toUpperCase() || "?";
+  const name = displayName(user);
+  const email = user?.email ?? null;
+  const initial = (user?.name?.trim() || email || "").charAt(0).toUpperCase() || "?";
 
   const rows: [label: string, value: string][] = [
-    ["Email", email ?? "—"],
+    ["Name", user?.name?.trim() || "—"],
+    ["Email", email ?? (user === undefined ? "—" : "Not signed in")],
     ["Practicing since", first ? longDate(first.recordedAt) : "—"],
     ["Sessions recorded", history ? `${history.length}` : "—"],
     ["Total practice time", history ? hoursAndMinutes(totalMinutes(history)) : "—"],
@@ -49,6 +61,13 @@ export default function AccountDetails() {
     ["Pieces in rotation", pieces !== null ? `${pieces}` : "—"],
   ];
 
+  const subtitle =
+    state === null
+      ? "Loading your history"
+      : history && history.length === 0
+        ? "No sessions recorded yet."
+        : `Day ${daysIn} of playing with a buddy.`;
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-4">
@@ -56,10 +75,8 @@ export default function AccountDetails() {
           {initial}
         </span>
         <div className="min-w-0">
-          <p className="truncate text-base font-medium">{email ?? "Signed in"}</p>
-          <p className="text-sm text-muted">
-            {daysIn === null ? "Loading your history" : `Day ${daysIn} of playing with a buddy.`}
-          </p>
+          <p className="truncate text-base font-medium">{name ?? email ?? "Signed in"}</p>
+          <p className="text-sm text-muted">{subtitle}</p>
         </div>
       </div>
       <dl className="divide-y divide-border rounded-md border border-border bg-surface">
@@ -70,6 +87,11 @@ export default function AccountDetails() {
           </div>
         ))}
       </dl>
+      {state ? (
+        <p className="text-xs text-muted">
+          {state.source === "live" ? PLACEHOLDER_NOTE : "The backend could not be reached, so these totals are sample data."}
+        </p>
+      ) : null}
     </div>
   );
 }

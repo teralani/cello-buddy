@@ -26,7 +26,7 @@ export default function AccountPage() {
         </p>
 
         <div className="mt-10 flex flex-col gap-10">
-          <PanelSection eyebrow="Account" title="Details" aside="Totals are sample data">
+          <PanelSection eyebrow="Account" title="Details">
             <AccountDetails />
           </PanelSection>
 

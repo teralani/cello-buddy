@@ -13,6 +13,7 @@ import { SCORE_MXL, SCORE_NAME_KEY } from "@/components/upload-form";
 import dataURLtoFile from "@/helpers";
 import { RIGHT_WRIST, WristTrack, type PoseLandmark } from "@/lib/bowMotion";
 import { METRICS_KEY } from "@/lib/metrics";
+import { recordSession } from "@/lib/practiceApi";
 import {
   PracticeEngine,
   SETTINGS_KEY,
@@ -125,23 +126,22 @@ export default function PracticeWorkspace() {
          ran to the end or was stopped part way. A run with nothing graded
          (stopped during the count-in) leaves any earlier session in place. */
       if (next.phase === "finished" && next.summary && next.summary.gradedNotes > 0) {
+        const metrics = toPracticeMetrics(
+          scoreName,
+          timeline,
+          next.grades,
+          next.summary,
+          settingsRef.current,
+          wrist.all(),
+        );
         try {
-          window.sessionStorage.setItem(
-            METRICS_KEY,
-            JSON.stringify(
-              toPracticeMetrics(
-                scoreName,
-                timeline,
-                next.grades,
-                next.summary,
-                settingsRef.current,
-                wrist.all(),
-              ),
-            ),
-          );
+          window.sessionStorage.setItem(METRICS_KEY, JSON.stringify(metrics));
         } catch {
           /* Session storage may be unavailable. The feedback page then reports no session. */
         }
+        /* Also store it for the home dashboard. A failed save is not the
+           student's problem mid-practice; the review page still works. */
+        void recordSession(metrics);
       }
     });
     engineRef.current = engine;

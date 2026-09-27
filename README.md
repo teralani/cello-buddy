@@ -49,6 +49,15 @@ The Next.js auth routes call the backend through the app's own origin at `/api/p
 - In `next dev`, `/api/py/*` is proxied to the local uvicorn at `http://127.0.0.1:8000`.
 - On Vercel, `api/main.py` is deployed as a Python serverless function at `/api/main`, and `/api/py/*` is rewritten to it. The FastAPI app strips the `/api/py` prefix itself, so the same routes work in both places. `SQL_DB_URL` (or `DATABASE_URL`) must be set in the Vercel project's environment variables.
 
+### What the app reads and writes
+
+- `POST /api/auth/login`, `register`, `logout` (`app/api/auth/`): sign-in against `/auth/token` and `/auth/`; the token is kept in an httpOnly cookie.
+- `GET /api/me`: the signed-in user's id and email from the token, plus their name from `/user/get-user/{id}/`.
+- `GET /api/practice/sessions`: the user's sessions from `/practice-session/user-ordered-scores/{id}`, newest first. `POST` stores a finished play-through through `/practice-session/create-practice-session/`; the practice screen calls it when a session ends.
+- `GET /api/practice/leaderboard`: every player's best score from `/practice-session/all-user-high-scores`, top five, with names looked up.
+
+The backend stores four numbers per session (pitch accuracy, bow share, articulation accuracy, and the score built from them) plus the time. The dashboard figures it does not store (piece, length, measures, tempo, notes graded, cents, timing accuracy) are fixed placeholder values on live rows; see `PLACEHOLDERS` in `lib/practiceHistory.ts`. When the backend cannot be reached at all, the dashboard falls back to sample sessions and says so.
+
 To use a backend hosted somewhere else instead, set `API_BASE_URL` to its origin (for example `API_BASE_URL=https://api.example.com`) and the auth routes will call it directly.
 
 ## Practice session
