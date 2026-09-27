@@ -45,3 +45,4 @@ node_modules/
 
 # Python virtual environment
 .venv/
+.venv-1/

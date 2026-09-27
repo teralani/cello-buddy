@@ -23,6 +23,25 @@ VOYAGE_API_KEY=pa-...
 - `ANTHROPIC_API_KEY` powers the feedback chatbot. Without it the chat page shows an error instead of a review.
 - `VOYAGE_API_KEY` is used for embeddings. It is needed to build the lesson index and, at runtime, to embed each question for retrieval. Without it the chatbot still works but does not suggest video clips.
 
+## Backend API
+
+Set `SQL_DB_URL` in the repo-root `.env.local` to the PostgreSQL connection URL from TigerData. The API also accepts `DATABASE_URL`. PostgreSQL connections use psycopg 3 and require TLS by default; an explicit `sslmode` in the URL is preserved.
+The frontend's server-side auth routes call the FastAPI backend at `API_BASE_URL`, which defaults to `http://127.0.0.1:8000`.
+
+```text
+SQL_DB_URL=postgresql://USER:PASSWORD@HOST:PORT/DATABASE?sslmode=require
+API_BASE_URL=http://127.0.0.1:8000
+```
+
+Install and run the API from the repo root:
+
+```bash
+python -m pip install -r api/requirements.txt
+uvicorn api.main:app --reload
+```
+
+The database must already contain the `users`, `practice_session`, and `connection` tables expected by the API models.
+
 ## Practice session
 
 The practice screen renders the score with OpenSheetMusicDisplay and grades a play-through against it.

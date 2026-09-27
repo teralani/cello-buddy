@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from starlette import status
 from api.database import SessionLocal
 from api.models.users import Users
@@ -38,6 +39,9 @@ db_dependency = Annotated[Session, Depends(get_db)]
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 def create_user(create_user_request: UsersBase, db: db_dependency):
+    if db.query(Users).filter(Users.email == create_user_request.email).first():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists")
+
     create_user_model = Users(
         name=create_user_request.name,
         email=create_user_request.email,
@@ -45,7 +49,15 @@ def create_user(create_user_request: UsersBase, db: db_dependency):
         password_hash=bcrypt_context.hash(create_user_request.password_hash),
     )
     db.add(create_user_model)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists") from error
+
+    db.refresh(create_user_model)
+    token = create_access_token(create_user_model.email, create_user_model.user_id, timedelta(minutes=20))
+    return {"access_token": token, "token_type": "bearer"}
 
 
 def authenticate_user(email: str, password: str, db):
