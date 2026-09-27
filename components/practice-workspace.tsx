@@ -249,16 +249,16 @@ export default function PracticeWorkspace() {
           <span className="text-muted">Timing ±</span>
           <input
             type="number"
-            min={30}
-            max={400}
+            min={0}
+            max={700}
             step={10}
             value={settings.timingToleranceMs}
             onChange={(event) =>
               updateSettings({
                 ...settings,
                 timingToleranceMs: Math.max(
-                  30,
-                  Math.min(400, Number(event.target.value) || 30),
+                  0,
+                  Math.min(700, Number(event.target.value) || 0),
                 ),
               })
             }

@@ -40,7 +40,7 @@ export type PracticeSettings = {
 
 export const defaultSettings: PracticeSettings = {
   bpm: 72,
-  timingToleranceMs: 120,
+  timingToleranceMs: 350,
   pitchToleranceCents: 50,
   pitchClarity: 0.6,
   ignoreOctave: true,

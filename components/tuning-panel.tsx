@@ -16,7 +16,7 @@ type NumericKey = {
 }[keyof PracticeSettings];
 
 const sliders: { key: NumericKey; label: string; hint: string; min: number; max: number; step: number; unit: string }[] = [
-  { key: "timingToleranceMs", label: "Rhythm wiggle room", hint: "How early or late a note may start and still count.", min: 30, max: 400, step: 10, unit: "ms" },
+  { key: "timingToleranceMs", label: "Rhythm wiggle room", hint: "How early or late a note may start and still count.", min: 0, max: 700, step: 10, unit: "ms" },
   { key: "pitchToleranceCents", label: "Pitch tolerance", hint: "Distance from the written pitch that still counts as in tune.", min: 5, max: 100, step: 5, unit: "¢" },
   { key: "pitchClarity", label: "Pitch clarity floor", hint: "How periodic a frame must be to count as a pitch. Lower for bowed strings, higher for a clean voice.", min: 0.3, max: 0.95, step: 0.05, unit: "" },
   { key: "dynamicToleranceSteps", label: "Dynamic tolerance", hint: "Levels off the marking that still count (p vs mp is one level).", min: 0, max: 3, step: 1, unit: "levels" },
