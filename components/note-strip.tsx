@@ -36,6 +36,7 @@ function describe(note: ScoreNote, grade: NoteGrade) {
   if (note.dynamic) lines.push(`Marked ${note.dynamic}`);
   if (note.slurContinues) lines.push("Under a slur");
   if (note.slurStart) lines.push("Starts a slur");
+  if (note.articulation) lines.push(`Wants ${note.articulation}`);
   if (grade.status === "pending" || grade.status === "current" || grade.status === "skipped") return lines.join("\n");
   if (note.isRest) {
     lines.push(grade.pitch.ok ? "Rest kept" : "Played through the rest");
@@ -50,6 +51,9 @@ function describe(note: ScoreNote, grade: NoteGrade) {
   if (grade.dynamic.played) lines.push(`Played ${grade.dynamic.played}${grade.dynamic.ok === false ? ` (wanted ${grade.dynamic.expected}) ✗` : ""}`);
   if (grade.slur.expected && grade.slur.playedAttack !== null) {
     lines.push(grade.slur.ok ? (grade.slur.expected === "slurred" ? "Slurred" : "New bow") : grade.slur.expected === "slurred" ? "New bow where a slur was written ✗" : "Slurred into a note that wanted a new bow ✗");
+  }
+  if (grade.articulation.expected) {
+    lines.push(grade.articulation.ok ? `Style ${grade.articulation.played}` : `Wanted ${grade.articulation.expected}, heard ${grade.articulation.played ?? "nothing"} ✗`);
   }
   return lines.join("\n");
 }

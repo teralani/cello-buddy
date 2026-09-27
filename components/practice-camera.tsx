@@ -33,6 +33,7 @@ type Props = {
      landmarks (MediaPipe indices, normalised 0..1) and the video's width over
      height. The practice screen uses it to record the right wrist. */
   onPose?: (timestamp: number, landmarks: PoseLandmark[], aspect: number) => void;
+  onArticulation?: (timestamp: number, prediction: NonNullable<Prediction>) => void;
 };
 
 const AUDIO_THRESHOLD = 0.0001;
@@ -64,13 +65,17 @@ const statusLabel: Record<CameraStatus, string> = {
   error: "Tracking unavailable",
 };
 
-export default function PracticeCamera({ onPose }: Props) {
+export default function PracticeCamera({ onPose, onArticulation }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   /* Kept in a ref so a new callback does not restart the camera. */
   const onPoseRef = useRef(onPose);
+  const onArticulationRef = useRef(onArticulation);
   useEffect(() => {
     onPoseRef.current = onPose;
   }, [onPose]);
+  useEffect(() => {
+    onArticulationRef.current = onArticulation;
+  }, [onArticulation]);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const analysisRef = useRef<HTMLCanvasElement>(null);
   const resultRef = useRef<WorkerResult>({});
@@ -128,6 +133,7 @@ export default function PracticeCamera({ onPose }: Props) {
       if (data.articulation) {
         setArticulation(data.articulation);
         setStrokeCount((count) => count + 1);
+        if (data.timestamp !== undefined) onArticulationRef.current?.(data.timestamp, data.articulation);
       }
       if (data.poseLandmarks) {
         resultRef.current = data;

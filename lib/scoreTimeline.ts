@@ -28,6 +28,8 @@ export type ScoreNote = {
   /* Inside a slur after its first note: expects no new attack. */
   slurContinues: boolean;
   staccato: boolean;
+  /* A style the score explicitly asks for and the camera can classify. */
+  articulation: "staccato" | "legato" | "detache" | null;
 };
 
 export type CursorStep = { step: number; startBeat: number };
@@ -189,6 +191,22 @@ export function buildTimeline(osmd: OpenSheetMusicDisplay): ScoreTimeline {
               articulation.articulationEnum === ArticulationEnum.staccatissimo ||
               articulation.articulationEnum === ArticulationEnum.spiccato,
           ) ?? false,
+          articulation: entry.Articulations?.some(
+            (articulation) =>
+              articulation.articulationEnum === ArticulationEnum.staccato ||
+              articulation.articulationEnum === ArticulationEnum.staccatissimo ||
+              articulation.articulationEnum === ArticulationEnum.spiccato,
+          )
+            ? "staccato"
+            : entry.Articulations?.some(
+                (articulation) => articulation.articulationEnum === ArticulationEnum.tenuto,
+              )
+              ? "detache"
+              : slurStart || slurContinues || entry.Articulations?.some(
+                (articulation) => articulation.articulationEnum === ArticulationEnum.detachedlegato,
+              )
+              ? "legato"
+              : null,
         };
         notes.push(scoreNote);
         sourceNotes.push(entryNotes);
