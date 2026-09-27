@@ -6,7 +6,9 @@ import { postureModel } from "@/lib/models/posture.generated";
 
 type WorkerInput = { type: "configure" | "frame" | "audio"; bitmap?: ImageBitmap; timestamp?: number; active?: boolean };
 type ImageLandmark = { x: number; y: number; z: number; visibility?: number };
-type WorkerResult = { type: string; label?: string; probabilities?: Record<string, number>; articulation?: { label: string; probabilities: Record<string, number> } | null; articulationProbabilities?: Record<string, number>; poseLandmarks: ImageLandmark[]; handLandmarks: ImageLandmark[]; bowHandX: number | null };
+/* `timestamp` echoes the frame's timestamp so the receiver can place the
+   landmarks in time despite inference latency. */
+type WorkerResult = { type: string; timestamp?: number; label?: string; probabilities?: Record<string, number>; articulation?: { label: string; probabilities: Record<string, number> } | null; articulationProbabilities?: Record<string, number>; poseLandmarks: ImageLandmark[]; handLandmarks: ImageLandmark[]; bowHandX: number | null };
 let pose: PoseLandmarker | undefined;
 let hand: HandLandmarker | undefined;
 const history: string[] = [];
@@ -38,7 +40,7 @@ self.onmessage = async ({ data }: MessageEvent<WorkerInput>) => {
   const landmarks = (poseResult.worldLandmarks[0] ?? []) as WorldLandmark[];
   const imagePoseLandmarks = (poseResult.landmarks[0] ?? []) as ImageLandmark[];
   if (landmarks.length <= 16) {
-    postMessage({ type: "landmarks", poseLandmarks: imagePoseLandmarks, handLandmarks: [], bowHandX: null });
+    postMessage({ type: "landmarks", timestamp: data.timestamp, poseLandmarks: imagePoseLandmarks, handLandmarks: [], bowHandX: null });
     data.bitmap.close();
     return;
   }
@@ -56,7 +58,7 @@ self.onmessage = async ({ data }: MessageEvent<WorkerInput>) => {
   }
   const counts = history.reduce<Record<string, number>>((all, item) => ({ ...all, [item]: (all[item] ?? 0) + 1 }), {});
   const smoothedLabel = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0];
-  const result: WorkerResult = { type: "result", label: smoothedLabel, probabilities: posturePrediction?.probabilities, articulation: articulation ?? null, articulationProbabilities: articulation?.probabilities, poseLandmarks: imagePoseLandmarks, handLandmarks: imageHandLandmarks, bowHandX };
+  const result: WorkerResult = { type: "result", timestamp: data.timestamp, label: smoothedLabel, probabilities: posturePrediction?.probabilities, articulation: articulation ?? null, articulationProbabilities: articulation?.probabilities, poseLandmarks: imagePoseLandmarks, handLandmarks: imageHandLandmarks, bowHandX };
   postMessage(result);
   data.bitmap.close();
 };

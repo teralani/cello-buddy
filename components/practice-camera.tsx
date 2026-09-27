@@ -2,6 +2,7 @@
 
 import { startTransition, useEffect, useRef, useState } from "react";
 import { angleDelta, bowAngle, detectDualTapePoints, type DualTapePoints, type TapeColor } from "@/lib/bowVision";
+import type { PoseLandmark } from "@/lib/bowMotion";
 import { rmsOf } from "@/lib/audioPitch";
 
 /* The live camera window on the practice screen. Same pipeline as the model
@@ -19,10 +20,19 @@ type Prediction = { label: string; probabilities: Record<string, number> } | nul
 type WorkerResult = {
   type?: string;
   message?: string;
-  poseLandmarks?: Point[];
+  /* Frame timestamp (performance.now() clock) the landmarks belong to. */
+  timestamp?: number;
+  poseLandmarks?: PoseLandmark[];
   handLandmarks?: Point[];
   bowHandX?: number | null;
   articulation?: Prediction;
+};
+
+type Props = {
+  /* Called for every pose result with the frame's timestamp, the pose
+     landmarks (MediaPipe indices, normalised 0..1) and the video's width over
+     height. The practice screen uses it to record the right wrist. */
+  onPose?: (timestamp: number, landmarks: PoseLandmark[], aspect: number) => void;
 };
 
 const AUDIO_THRESHOLD = 0.0001;
@@ -54,8 +64,13 @@ const statusLabel: Record<CameraStatus, string> = {
   error: "Tracking unavailable",
 };
 
-export default function PracticeCamera() {
+export default function PracticeCamera({ onPose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  /* Kept in a ref so a new callback does not restart the camera. */
+  const onPoseRef = useRef(onPose);
+  useEffect(() => {
+    onPoseRef.current = onPose;
+  }, [onPose]);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const analysisRef = useRef<HTMLCanvasElement>(null);
   const resultRef = useRef<WorkerResult>({});
@@ -114,7 +129,12 @@ export default function PracticeCamera() {
         setArticulation(data.articulation);
         setStrokeCount((count) => count + 1);
       }
-      if (data.poseLandmarks) resultRef.current = data;
+      if (data.poseLandmarks) {
+        resultRef.current = data;
+        if (data.timestamp !== undefined && data.poseLandmarks.length > 0) {
+          onPoseRef.current?.(data.timestamp, data.poseLandmarks, (video.videoWidth || 16) / (video.videoHeight || 9));
+        }
+      }
     };
     worker.postMessage({ type: "configure" });
 

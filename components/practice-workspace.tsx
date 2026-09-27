@@ -11,6 +11,7 @@ import ScoreOverlay from "@/components/score-overlay";
 import TuningPanel from "@/components/tuning-panel";
 import { SCORE_MXL, SCORE_NAME_KEY } from "@/components/upload-form";
 import dataURLtoFile from "@/helpers";
+import { RIGHT_WRIST, WristTrack, type PoseLandmark } from "@/lib/bowMotion";
 import { METRICS_KEY } from "@/lib/metrics";
 import {
   PracticeEngine,
@@ -24,6 +25,7 @@ import {
   type PracticeSettings,
 } from "@/lib/practiceEngine";
 import { buildTimeline, type ScoreTimeline } from "@/lib/scoreTimeline";
+import { setSessionFinisher } from "@/lib/sessionHandoff";
 
 /* The practice screen below the header: the play bar, the note strip, and
    the camera and sheet music panels. Owns the engine and the score overlay. */
@@ -40,8 +42,34 @@ export default function PracticeWorkspace() {
   const [showTuning, setShowTuning] = useState(false);
   const [osmd, setOsmd] = useState<OSMD | null>(null);
   const engineRef = useRef<PracticeEngine | null>(null);
+  /* Right wrist positions from the camera, stamped with score time while the
+     engine runs. Cleared at each Play and folded into the metrics at the end. */
+  const [wrist] = useState(() => new WristTrack());
+  /* The settings in force when a session ends, read when its metrics are written. */
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
-  useEffect(() => () => engineRef.current?.dispose(), []);
+  /* A session can be ended from outside the workspace: by the Review button
+     in the header mid-piece, or by leaving the screen. stop() grades what
+     was played and reports "finished", which stores the metrics (see play). */
+  useEffect(() => {
+    const finish = () => engineRef.current?.stop();
+    setSessionFinisher(finish);
+    return () => {
+      setSessionFinisher(null);
+      finish();
+      engineRef.current?.dispose();
+    };
+  }, []);
+
+  const handlePose = useCallback(
+    (timestamp: number, landmarks: PoseLandmark[], aspect: number) => {
+      wrist.push(landmarks[RIGHT_WRIST], aspect, engineRef.current?.scoreTimeAt(timestamp) ?? null);
+    },
+    [wrist],
+  );
 
   const handleReady = useCallback((instance: OSMD) => {
     try {
@@ -69,31 +97,35 @@ export default function PracticeWorkspace() {
 
   const getTime = useCallback(() => engineRef.current?.now() ?? null, []);
 
-  /* Hand the finished session to the review page. */
-  useEffect(() => {
-    if (state.phase !== "finished" || !timeline || !state.summary) return;
-    try {
-      window.sessionStorage.setItem(
-        METRICS_KEY,
-        JSON.stringify(
-          toPracticeMetrics(
-            scoreName,
-            timeline,
-            state.grades,
-            state.summary,
-            settings,
-          ),
-        ),
-      );
-    } catch {
-      /* Session storage may be unavailable. The review button falls back to a sample. */
-    }
-  }, [state.phase, state.summary, state.grades, timeline, scoreName, settings]);
-
   function play() {
     if (!timeline) return;
     engineRef.current?.dispose();
-    const engine = new PracticeEngine(timeline, settings, setState);
+    wrist.clear();
+    const engine = new PracticeEngine(timeline, settings, (next) => {
+      setState(next);
+      /* Hand the session to the review page the moment it ends, whether it
+         ran to the end or was stopped part way. A run with nothing graded
+         (stopped during the count-in) leaves any earlier session in place. */
+      if (next.phase === "finished" && next.summary && next.summary.gradedNotes > 0) {
+        try {
+          window.sessionStorage.setItem(
+            METRICS_KEY,
+            JSON.stringify(
+              toPracticeMetrics(
+                scoreName,
+                timeline,
+                next.grades,
+                next.summary,
+                settingsRef.current,
+                wrist.all(),
+              ),
+            ),
+          );
+        } catch {
+          /* Session storage may be unavailable. The feedback page then reports no session. */
+        }
+      }
+    });
     engineRef.current = engine;
     setShowTuning(false);
     void engine.start();
@@ -252,7 +284,7 @@ export default function PracticeWorkspace() {
           aria-label="Camera"
           className="min-h-0 overflow-hidden bg-[#141311] lg:border-r lg:border-border"
         >
-          <PracticeCamera />
+          <PracticeCamera onPose={handlePose} />
         </section>
 
         <section

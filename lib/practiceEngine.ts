@@ -1,4 +1,5 @@
 import { detectPitchNsdf, PitchSmoother, rmsOf, toDecibels } from "@/lib/audioPitch";
+import { analyzeBowMotion, type WristSample } from "@/lib/bowMotion";
 import type { MeasureMetrics, PracticeMetrics } from "@/lib/metrics";
 import { DYNAMIC_MARKS, midiToName, type DynamicMark, type ScoreNote, type ScoreTimeline } from "@/lib/scoreTimeline";
 
@@ -94,6 +95,8 @@ export type SessionSummary = {
   meanAbsTimingMs: number | null;
   averagePlayedBpm: number | null;
   durationSeconds: number;
+  /* The session was stopped before the score ran out. */
+  stoppedEarly: boolean;
 };
 
 export type Phase = "idle" | "requesting-mic" | "countdown" | "playing" | "finished" | "error";
@@ -203,6 +206,13 @@ export class PracticeEngine {
   now(): number | null {
     if (!this.context || this.finished) return null;
     return this.context.currentTime - this.startTime;
+  }
+
+  /* Converts a performance.now() style timestamp, such as a camera frame's,
+     to score seconds on the audio clock. Null when not running. */
+  scoreTimeAt(performanceMs: number): number | null {
+    if (!this.context || this.finished) return null;
+    return this.context.currentTime - (performance.now() - performanceMs) / 1000 - this.startTime;
   }
 
   async start() {
@@ -507,7 +517,7 @@ export class PracticeEngine {
     for (let index = 0; index < grades.length; index += 1) {
       if (grades[index].status === "pending" || grades[index].status === "current") grades[index] = { ...grades[index], status: "skipped" };
     }
-    const summary = summarize(this.timeline, grades, this.settings, Math.max(0, t));
+    const summary = summarize(this.timeline, grades, this.settings, Math.max(0, t), stoppedEarly);
     this.teardownAudio();
     this.emit({ phase: "finished", grades, summary, currentNoteIndex: -1, live: { midi: null, name: null, cents: null, db: -120 } });
   }
@@ -523,22 +533,43 @@ function meanAbs(values: (number | null)[]) {
   return present.length ? present.reduce((sum, value) => sum + Math.abs(value), 0) / present.length : null;
 }
 
-export function summarize(timeline: ScoreTimeline, grades: NoteGrade[], settings: PracticeSettings, durationSeconds: number): SessionSummary {
-  const graded = grades.filter((grade, index) => !timeline.notes[index].isRest && grade.status !== "pending" && grade.status !== "skipped" && grade.status !== "current");
-  const played = graded.filter((grade) => grade.timing.deviationMs !== null);
-  let averagePlayedBpm: number | null = null;
-  if (played.length >= 4) {
-    /* Slope of played time against written time gives the effective tempo. */
-    const beatSeconds = 60 / settings.bpm;
-    const points = played.map((grade) => {
+function meanOf(values: number[]) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+function rounded(value: number | null) {
+  return value === null ? null : Math.round(value);
+}
+
+function percent(values: (boolean | null)[]) {
+  const fraction = ratio(values);
+  return fraction === null ? null : Math.round(fraction * 100);
+}
+
+/* Effective tempo over a run of graded notes: the slope of played onset time
+   against written time. Needs `minimum` notes with an onset (never fewer than
+   two), and gives up on slopes outside half to double speed, which only a
+   misheard onset produces. */
+export function playedTempo(timeline: ScoreTimeline, grades: NoteGrade[], bpm: number, minimum: number): number | null {
+  const beatSeconds = 60 / bpm;
+  const points = grades
+    .filter((grade) => grade.timing.deviationMs !== null)
+    .map((grade) => {
       const expected = timeline.notes[grade.index].startBeat * beatSeconds;
-      return [expected, expected + (grade.timing.deviationMs ?? 0) / 1000];
+      return [expected, expected + (grade.timing.deviationMs ?? 0) / 1000] as const;
     });
-    const meanX = points.reduce((sum, [x]) => sum + x, 0) / points.length;
-    const meanY = points.reduce((sum, [, y]) => sum + y, 0) / points.length;
-    const slope = points.reduce((sum, [x, y]) => sum + (x - meanX) * (y - meanY), 0) / (points.reduce((sum, [x]) => sum + (x - meanX) ** 2, 0) || 1);
-    if (slope > 0.5 && slope < 2) averagePlayedBpm = Math.round(settings.bpm / slope);
-  }
+  if (points.length < Math.max(2, minimum)) return null;
+  const meanX = points.reduce((sum, [x]) => sum + x, 0) / points.length;
+  const meanY = points.reduce((sum, [, y]) => sum + y, 0) / points.length;
+  const spread = points.reduce((sum, [x]) => sum + (x - meanX) ** 2, 0);
+  if (spread === 0) return null;
+  const slope = points.reduce((sum, [x, y]) => sum + (x - meanX) * (y - meanY), 0) / spread;
+  return slope > 0.5 && slope < 2 ? Math.round(bpm / slope) : null;
+}
+
+export function summarize(timeline: ScoreTimeline, grades: NoteGrade[], settings: PracticeSettings, durationSeconds: number, stoppedEarly = false): SessionSummary {
+  const graded = grades.filter((grade, index) => !timeline.notes[index].isRest && grade.status !== "pending" && grade.status !== "skipped" && grade.status !== "current");
+  const averagePlayedBpm = playedTempo(timeline, graded, settings.bpm, 4);
   return {
     gradedNotes: graded.length,
     pitchAccuracy: ratio(graded.map((grade) => grade.pitch.ok)),
@@ -549,44 +580,83 @@ export function summarize(timeline: ScoreTimeline, grades: NoteGrade[], settings
     meanAbsTimingMs: meanAbs(graded.map((grade) => grade.timing.deviationMs)),
     averagePlayedBpm,
     durationSeconds,
+    stoppedEarly,
   };
 }
 
-/* Folds the per-note grades into the per-measure shape the feedback chat expects. */
-export function toPracticeMetrics(piece: string, timeline: ScoreTimeline, grades: NoteGrade[], summary: SessionSummary, settings: PracticeSettings): PracticeMetrics {
+/* Folds the per-note grades and the camera's wrist track into the per-measure
+   shape the feedback chat expects. Pitch and timing are grouped by the
+   measure each note belongs to; bow motion takes the wrist samples that fall
+   inside the measure's span of score time, rests included. */
+export function toPracticeMetrics(
+  piece: string,
+  timeline: ScoreTimeline,
+  grades: NoteGrade[],
+  summary: SessionSummary,
+  settings: PracticeSettings,
+  wrist: WristSample[] = [],
+): PracticeMetrics {
+  const beatSeconds = 60 / settings.bpm;
+
+  const spans = new Map<number, { start: number; end: number }>();
+  for (const note of timeline.notes) {
+    const span = spans.get(note.measure) ?? { start: Infinity, end: -Infinity };
+    span.start = Math.min(span.start, note.startBeat * beatSeconds);
+    span.end = Math.max(span.end, (note.startBeat + note.durationBeats) * beatSeconds);
+    spans.set(note.measure, span);
+  }
+
   const byMeasure = new Map<number, NoteGrade[]>();
   grades.forEach((grade, index) => {
     const note = timeline.notes[index];
     if (note.isRest || grade.status === "pending" || grade.status === "skipped" || grade.status === "current") return;
     byMeasure.set(note.measure, [...(byMeasure.get(note.measure) ?? []), grade]);
   });
+
   const measures: MeasureMetrics[] = [...byMeasure.entries()]
     .sort(([a], [b]) => a - b)
     .map(([number, measureGrades]) => {
       const cents = measureGrades.map((grade) => grade.pitch.cents).filter((value): value is number => value !== null);
       const timings = measureGrades.map((grade) => grade.timing.deviationMs).filter((value): value is number => value !== null);
+      const span = spans.get(number) ?? { start: 0, end: 0 };
       return {
         number,
         notes: measureGrades.length,
-        intonationMeanCents: cents.length ? Math.round(cents.reduce((sum, value) => sum + value, 0) / cents.length) : 0,
-        intonationMaxAbsCents: cents.length ? Math.round(Math.max(...cents.map(Math.abs))) : 0,
-        timingDeviationMs: timings.length ? Math.round(timings.reduce((sum, value) => sum + value, 0) / timings.length) : 0,
-        bowAngleVarianceDeg: 0,
-        contactPointDriftMm: 0,
-        postureFlags: [],
+        bowedNotes: measureGrades.filter((grade) => !timeline.notes[grade.index].slurContinues).length,
+        pitch: {
+          accuracyPct: percent(measureGrades.map((grade) => grade.pitch.ok)),
+          meanCents: rounded(meanOf(cents)),
+          meanAbsCents: rounded(meanAbs(cents)),
+          maxAbsCents: cents.length ? Math.round(Math.max(...cents.map(Math.abs))) : null,
+          unheard: measureGrades.length - cents.length,
+        },
+        timing: {
+          accuracyPct: percent(measureGrades.map((grade) => grade.timing.ok)),
+          meanDeviationMs: rounded(meanOf(timings)),
+          meanAbsDeviationMs: rounded(meanAbs(timings)),
+          playedBpm: playedTempo(timeline, measureGrades, settings.bpm, 2),
+          unheard: measureGrades.length - timings.length,
+        },
+        bow: analyzeBowMotion(wrist, span.start, span.end),
       };
     });
+
   return {
     piece,
     recordedAt: new Date().toISOString(),
     durationSeconds: Math.round(summary.durationSeconds),
-    tempo: { target: settings.bpm, averagePlayed: summary.averagePlayedBpm ?? settings.bpm },
+    completed: !summary.stoppedEarly,
+    measuresInPiece: timeline.measureCount,
+    tempo: { target: settings.bpm, averagePlayed: summary.averagePlayedBpm },
     summary: {
-      intonationMeanAbsCents: Math.round(summary.meanAbsCents ?? 0),
-      timingMeanAbsMs: Math.round(summary.meanAbsTimingMs ?? 0),
-      bowAngleVarianceDeg: 0,
-      contactPointDriftMm: 0,
-      postureFlags: [],
+      gradedNotes: summary.gradedNotes,
+      pitchAccuracyPct: summary.pitchAccuracy === null ? null : Math.round(summary.pitchAccuracy * 100),
+      meanAbsCents: rounded(summary.meanAbsCents),
+      timingAccuracyPct: summary.rhythmAccuracy === null ? null : Math.round(summary.rhythmAccuracy * 100),
+      meanAbsTimingMs: rounded(summary.meanAbsTimingMs),
+      dynamicAccuracyPct: summary.dynamicAccuracy === null ? null : Math.round(summary.dynamicAccuracy * 100),
+      slurAccuracyPct: summary.slurAccuracy === null ? null : Math.round(summary.slurAccuracy * 100),
+      bow: analyzeBowMotion(wrist, 0, timeline.totalBeats * beatSeconds),
     },
     measures,
   };
