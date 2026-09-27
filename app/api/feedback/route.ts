@@ -11,7 +11,13 @@ const MISSING_KEY_MESSAGE =
 
 const TEACHER_PROMPT = `You are Cello Buddy, a patient cello teacher reviewing a student's practice session.
 
-You receive a JSON object of metrics from the session: pitch error in cents per measure (positive is sharp), timing error in ms (negative is rushed), bow angle variance, contact point drift in mm (positive is toward the fingerboard), and posture flags.
+You receive a JSON object of measurements from the session. Everything in it was measured: pitch and timing come from the microphone, bow motion from the camera tracking the student's right wrist. The summary covers the whole play-through and each entry in measures covers one measure.
+- pitch: accuracyPct is the share of notes within the pitch tolerance; meanCents is signed, positive is sharp; unheard is how many notes produced no detectable pitch.
+- timing: accuracyPct is the share of notes whose onset landed within the timing tolerance; meanDeviationMs is signed, negative is early or rushed; playedBpm is the tempo actually played in that measure, to compare with tempo.target and tempo.averagePlayed.
+- articulation: accuracyPct is the share of explicitly marked notes played with the requested style; checked is how many marked notes were measured. A null accuracyPct means the score had no supported style markings, not that the student failed.
+- bow: the right wrist's path. pathAngleDeg is the tilt of its line of travel, 0 is level bowing and anything above about 20 means the arm is moving up and down rather than across. horizontalShare is the fraction of travel that was sideways. reversals counts bow direction changes; compare it with bowedNotes, the number of notes that should each get a new bow. horizontalRangePct and verticalRangePct are the path's extent as a percentage of the camera frame's height; when both are near 0 the bow arm barely moved. bow is null when the camera did not see the wrist.
+- completed is false when the student stopped before the end; measures then lists only what was played, out of measuresInPiece. Review what is there and do not treat the unplayed measures as a problem.
+- null anywhere means that value could not be measured. Do not treat null as zero or as a problem.
 
 How to respond:
 - Be brief. The whole reply should fit on one screen without scrolling.
@@ -42,13 +48,13 @@ function retrievalQuery(metrics: PracticeMetrics, messages: Anthropic.MessagePar
 
   const parts: string[] = [];
   const s = metrics.summary;
-  if (s.intonationMeanAbsCents > 10) parts.push("cello intonation playing sharp or flat");
-  if (s.contactPointDriftMm > 4 || s.bowAngleVarianceDeg > 8)
-    parts.push("keeping the bow straight and the contact point steady");
-  if (Math.abs(metrics.tempo.averagePlayed - metrics.tempo.target) > 4 || s.timingMeanAbsMs > 25)
+  if ((s.meanAbsCents ?? 0) > 10 || (s.pitchAccuracyPct ?? 100) < 70)
+    parts.push("cello intonation playing sharp or flat");
+  if (s.bow && ((s.bow.pathAngleDeg ?? 0) > 20 || (s.bow.horizontalShare ?? 1) < 0.75))
+    parts.push("keeping the bow straight and the right arm moving level across the strings");
+  const tempoOff = metrics.tempo.averagePlayed !== null && Math.abs(metrics.tempo.averagePlayed - metrics.tempo.target) > 4;
+  if (tempoOff || (s.meanAbsTimingMs ?? 0) > 25 || (s.timingAccuracyPct ?? 100) < 70)
     parts.push("rushing and keeping a steady tempo");
-  if (s.postureFlags.includes("shoulder_elevated")) parts.push("relaxed shoulders and bow arm posture");
-  if (s.postureFlags.includes("wrist_collapsed")) parts.push("left hand wrist shape");
   return parts.join(", ") || "cello practice fundamentals";
 }
 

@@ -9,8 +9,8 @@ import PitchMonitor from "@/components/pitch-monitor";
 
 const postureNames = ["elbow angle", "bow elevation", "wrist angle", "thumb angle", "index curl", "pinky curl"];
 const postureDefaults = [110, 25, 165, 145, 150, 135];
-const articulationNames = ["duration ms", "mean speed", "speed variance", "note onsets"];
-const articulationDefaults = [520, 0.002, 0.004, 1];
+const articulationNames = ["duration ms", "mean speed", "median speed", "max speed", "speed variance", "speed p90", "mean acceleration", "max acceleration", "acceleration variance", "peak speed position", "movement distance", "direction"];
+const articulationDefaults = [520, 0.002, 0.002, 0.004, 0.000001, 0.004, 0.00001, 0.00002, 0.000001, 0.5, 1, 1];
 
 export default function ModelTestBench() {
   const [postureFeatures, setPostureFeatures] = useState(postureDefaults);
@@ -29,13 +29,13 @@ export default function ModelTestBench() {
 
   function simulateStroke() {
     const segmenter = new BowStrokeSegmenter();
-    segmenter.addOnset();
+    segmenter.setAudioActive(true, 1);
     const samples = [[0, 0], [0.16, 100], [0.34, 200], [0.52, 300], [0.3, 400], [0.08, 520]];
     let completed: Stroke | null = null;
     for (const [x, timestamp] of samples) completed = segmenter.push(x, timestamp) ?? completed;
     if (!completed) return;
     setStroke(completed);
-    setArticulationFeatures([completed.durationMs, completed.meanSpeed, completed.speedVariance, completed.noteOnsetCount]);
+    setArticulationFeatures([completed.durationMs, completed.meanSpeed, completed.medianSpeed, completed.maxSpeed, completed.speedVariance, completed.speedP90, completed.meanAcceleration, completed.maxAcceleration, completed.accelerationVariance, completed.peakSpeedPosition, completed.movementDistance, completed.direction]);
   }
 
   return (
@@ -57,7 +57,7 @@ export default function ModelTestBench() {
           <p className="mb-4 text-xs text-ink-soft">The segmenter turns wrist motion into one stroke. Edit its four features or run a real segmentation sample.</p>
           <FeatureInputs names={articulationNames} values={articulationFeatures} onChange={updateArticulation} min={0} max={indexMax(articulationFeatures)} step={0.001} />
           <button type="button" onClick={simulateStroke} className="mt-4 border-2 border-butter px-4 py-2 font-display text-2xl uppercase text-butter hover:bg-butter hover:text-night">Simulate stroke</button>
-          {stroke ? <div className="mt-3 border-l-2 border-sky pl-3 text-xs text-ink-soft">Segmented {stroke.durationMs.toFixed(0)} ms / {stroke.noteOnsetCount} onset{stroke.noteOnsetCount === 1 ? "" : "s"}</div> : null}
+          {stroke ? <div className="mt-3 border-l-2 border-sky pl-3 text-xs text-ink-soft">Segmented {stroke.durationMs.toFixed(0)} ms</div> : null}
           <Prediction result={articulationResult} empty="No trained articulation artifact loaded" />
         </ModelPanel>
       </div>

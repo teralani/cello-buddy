@@ -1,49 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type FormEvent,
-} from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { FIRST_PROMPT, type ChatEvent, type LessonSource } from "@/lib/chat";
 import { buttonClass } from "@/components/button";
-import { METRICS_KEY, type PracticeMetrics } from "@/lib/metrics";
+import type { PracticeMetrics } from "@/lib/metrics";
+import { useSessionMetrics } from "@/lib/useSessionMetrics";
 
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
 };
-
-/* Raw metrics JSON from sessionStorage. `undefined` means not hydrated yet. */
-function subscribe(onChange: () => void) {
-  window.addEventListener("storage", onChange);
-  return () => window.removeEventListener("storage", onChange);
-}
-
-function getSnapshot(): string | null {
-  try {
-    return window.sessionStorage.getItem(METRICS_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function getServerSnapshot(): undefined {
-  return undefined;
-}
-
-function parseMetrics(raw: string | null | undefined): PracticeMetrics | null {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as PracticeMetrics;
-  } catch {
-    return null;
-  }
-}
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -212,25 +179,34 @@ function MessageText({
    priority order, padded with general questions when the playing was clean. */
 function suggestQuestions(metrics: PracticeMetrics): string[] {
   const s = metrics.summary;
+  /* Each score reaches 1 at the point the metric starts to matter. */
+  const missPct = (accuracyPct: number | null) =>
+    accuracyPct === null ? 0 : (100 - accuracyPct) / 30;
+  const tempoOff =
+    metrics.tempo.averagePlayed === null
+      ? 0
+      : Math.abs(metrics.tempo.averagePlayed - metrics.tempo.target) / 4;
   const ranked: { score: number; question: string }[] = [
     {
-      score: s.intonationMeanAbsCents / 8,
+      score: Math.max((s.meanAbsCents ?? 0) / 8, missPct(s.pitchAccuracyPct)),
       question: "How do I fix the notes that were sharp or flat?",
     },
     {
-      score: Math.max(s.contactPointDriftMm / 4, s.bowAngleVarianceDeg / 8),
-      question: "What should I do about my bow drifting?",
+      score: s.bow
+        ? Math.max(
+            (s.bow.pathAngleDeg ?? 0) / 20,
+            (1 - (s.bow.horizontalShare ?? 1)) / 0.25,
+          )
+        : 0,
+      question: "How do I keep my bow arm moving straight across?",
     },
     {
       score: Math.max(
-        Math.abs(metrics.tempo.averagePlayed - metrics.tempo.target) / 4,
-        s.timingMeanAbsMs / 25,
+        tempoOff,
+        (s.meanAbsTimingMs ?? 0) / 25,
+        missPct(s.timingAccuracyPct),
       ),
-      question: "How do I stop rushing the tempo?",
-    },
-    {
-      score: s.postureFlags.length > 0 ? 1.5 : 0,
-      question: "How do I fix my posture while I play?",
+      question: "How do I keep a steadier tempo?",
     },
   ];
   const picked = ranked
@@ -246,8 +222,7 @@ function suggestQuestions(metrics: PracticeMetrics): string[] {
 }
 
 export default function ChatThread() {
-  const raw = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  const metrics = useMemo(() => parseMetrics(raw), [raw]);
+  const metrics = useSessionMetrics();
   const [streaming, setStreaming] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   /* Every clip the server has sent this session, keyed by URL, so links in
@@ -375,7 +350,7 @@ export default function ChatThread() {
     messages[0].content.length > 0;
   const suggestions = metrics && reviewDone ? suggestQuestions(metrics) : [];
 
-  if (raw === undefined) {
+  if (metrics === undefined) {
     return <p className="p-6 text-sm text-muted">Loading session.</p>;
   }
 
@@ -396,7 +371,7 @@ export default function ChatThread() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-8">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-8">
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
           {messages.map((message, i) =>
             message.role === "user" ? (

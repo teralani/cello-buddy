@@ -4,3 +4,4 @@ scikit-learn>=1.4
 m2cgen>=0.10
 opencv-python>=4.9
 mediapipe>=0.10
+sounddevice>=0.4.6

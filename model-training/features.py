@@ -1,9 +1,5 @@
-"""Feature parity helpers for offline posture training.
-
-The six returned values must stay in the same order as lib/features.ts.
-"""
-import math
-
+"""Feature parity helpers for the offline posture and articulation models."""
+ 
 
 def _angle(first, vertex, last):
     first_vector = [first[i] - vertex[i] for i in range(3)]
@@ -31,3 +27,30 @@ def posture_features(pose_landmarks, hand_landmarks):
         _angle(index_mcp, index_pip, index_tip),
         _angle(pinky_mcp, pinky_pip, pinky_tip),
     ]
+
+
+def articulation_features(duration_ms, speeds, accelerations, direction):
+    """Return motion-only features in the order used by the browser model."""
+    speeds = [abs(value) for value in speeds] or [0.0]
+    accelerations = [abs(value) for value in accelerations] or [0.0]
+    ordered_speeds = sorted(speeds)
+    mean_speed = sum(speeds) / len(speeds)
+    mean_acceleration = sum(accelerations) / len(accelerations)
+    speed_variance = sum((value - mean_speed) ** 2 for value in speeds) / len(speeds)
+    acceleration_variance = sum((value - mean_acceleration) ** 2 for value in accelerations) / len(accelerations)
+    peak_speed = max(speeds)
+    peak_position = speeds.index(peak_speed) / max(1, len(speeds) - 1)
+    return {
+        "duration_ms": duration_ms,
+        "mean_speed": mean_speed,
+        "median_speed": ordered_speeds[len(ordered_speeds) // 2],
+        "max_speed": peak_speed,
+        "speed_variance": speed_variance,
+        "speed_p90": ordered_speeds[min(len(ordered_speeds) - 1, math.floor(len(ordered_speeds) * 0.9))],
+        "mean_acceleration": mean_acceleration,
+        "max_acceleration": max(accelerations),
+        "acceleration_variance": acceleration_variance,
+        "peak_speed_position": peak_position,
+        "movement_distance": sum(speeds),
+        "direction": direction,
+    }

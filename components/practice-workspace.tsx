@@ -6,10 +6,12 @@ import { buttonClass } from "@/components/button";
 import NoteStrip from "@/components/note-strip";
 import OpenSheetMusicDisplay from "@/components/open-sheet-music-display";
 import PlaceholderPanel from "@/components/placeholder-panel";
+import PracticeCamera from "@/components/practice-camera";
 import ScoreOverlay from "@/components/score-overlay";
 import TuningPanel from "@/components/tuning-panel";
 import { SCORE_MXL, SCORE_NAME_KEY } from "@/components/upload-form";
 import dataURLtoFile from "@/helpers";
+import { RIGHT_WRIST, WristTrack, type PoseLandmark } from "@/lib/bowMotion";
 import { METRICS_KEY } from "@/lib/metrics";
 import {
   PracticeEngine,
@@ -23,6 +25,11 @@ import {
   type PracticeSettings,
 } from "@/lib/practiceEngine";
 import { buildTimeline, type ScoreTimeline } from "@/lib/scoreTimeline";
+import { setSessionFinisher } from "@/lib/sessionHandoff";
+
+/* Range covered by the tempo slider. The text box accepts any positive value. */
+const TEMPO_SLIDER_MIN = 20;
+const TEMPO_SLIDER_MAX = 240;
 
 /* The practice screen below the header: the play bar, the note strip, and
    the camera and sheet music panels. Owns the engine and the score overlay. */
@@ -35,12 +42,52 @@ export default function PracticeWorkspace() {
   const [loadError, setLoadError] = useState<string | null>(stored.error);
   const [timeline, setTimeline] = useState<ScoreTimeline | null>(null);
   const [settings, setSettings] = useState<PracticeSettings>(loadSettings);
+  /* What was last typed in the tempo box, and the bpm in force at the time.
+     While settings.bpm still matches, the box shows the typed text as is, so
+     it can be cleared mid-edit; once bpm changes elsewhere (the slider, a
+     loaded score) the box shows the new value. Only a positive number is applied. */
+  const [bpmDraft, setBpmDraft] = useState({ text: String(settings.bpm), bpm: settings.bpm });
+  const bpmText = bpmDraft.bpm === settings.bpm ? bpmDraft.text : String(settings.bpm);
   const [state, setState] = useState<EngineState>(() => initialState(null));
   const [showTuning, setShowTuning] = useState(false);
   const [osmd, setOsmd] = useState<OSMD | null>(null);
   const engineRef = useRef<PracticeEngine | null>(null);
+  /* Right wrist positions from the camera, stamped with score time while the
+     engine runs. Cleared at each Play and folded into the metrics at the end. */
+  const [wrist] = useState(() => new WristTrack());
+  /* The settings in force when a session ends, read when its metrics are written. */
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
-  useEffect(() => () => engineRef.current?.dispose(), []);
+  /* A session can be ended from outside the workspace: by the Review button
+     in the header mid-piece, or by leaving the screen. stop() grades what
+     was played and reports "finished", which stores the metrics (see play). */
+  useEffect(() => {
+    const finish = () => engineRef.current?.stop();
+    setSessionFinisher(finish);
+    return () => {
+      setSessionFinisher(null);
+      finish();
+      engineRef.current?.dispose();
+    };
+  }, []);
+
+  const handlePose = useCallback(
+    (timestamp: number, landmarks: PoseLandmark[], aspect: number) => {
+      wrist.push(landmarks[RIGHT_WRIST], aspect, engineRef.current?.scoreTimeAt(timestamp) ?? null);
+    },
+    [wrist],
+  );
+
+  const handleArticulation = useCallback(
+    (timestamp: number, prediction: { label: string }) => {
+      const scoreTime = engineRef.current?.scoreTimeAt(timestamp);
+      if (scoreTime !== null && scoreTime !== undefined) engineRef.current?.recordArticulation(scoreTime, prediction.label);
+    },
+    [],
+  );
 
   const handleReady = useCallback((instance: OSMD) => {
     try {
@@ -68,31 +115,35 @@ export default function PracticeWorkspace() {
 
   const getTime = useCallback(() => engineRef.current?.now() ?? null, []);
 
-  /* Hand the finished session to the review page. */
-  useEffect(() => {
-    if (state.phase !== "finished" || !timeline || !state.summary) return;
-    try {
-      window.sessionStorage.setItem(
-        METRICS_KEY,
-        JSON.stringify(
-          toPracticeMetrics(
-            scoreName,
-            timeline,
-            state.grades,
-            state.summary,
-            settings,
-          ),
-        ),
-      );
-    } catch {
-      /* Session storage may be unavailable. The review button falls back to a sample. */
-    }
-  }, [state.phase, state.summary, state.grades, timeline, scoreName, settings]);
-
   function play() {
     if (!timeline) return;
     engineRef.current?.dispose();
-    const engine = new PracticeEngine(timeline, settings, setState);
+    wrist.clear();
+    const engine = new PracticeEngine(timeline, settings, (next) => {
+      setState(next);
+      /* Hand the session to the review page the moment it ends, whether it
+         ran to the end or was stopped part way. A run with nothing graded
+         (stopped during the count-in) leaves any earlier session in place. */
+      if (next.phase === "finished" && next.summary && next.summary.gradedNotes > 0) {
+        try {
+          window.sessionStorage.setItem(
+            METRICS_KEY,
+            JSON.stringify(
+              toPracticeMetrics(
+                scoreName,
+                timeline,
+                next.grades,
+                next.summary,
+                settingsRef.current,
+                wrist.all(),
+              ),
+            ),
+          );
+        } catch {
+          /* Session storage may be unavailable. The feedback page then reports no session. */
+        }
+      }
+    });
     engineRef.current = engine;
     setShowTuning(false);
     void engine.start();
@@ -136,33 +187,43 @@ export default function PracticeWorkspace() {
           </button>
         )}
 
-        <label className="flex items-center gap-2 text-sm">
-          <span className="text-muted">Tempo</span>
+        <div className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2">
+            <span className="text-muted">Tempo</span>
+            <input
+              type="number"
+              value={bpmText}
+              disabled={running}
+              onChange={(event) => {
+                const text = event.target.value;
+                const bpm = Number(text);
+                const valid = text.trim() !== "" && Number.isFinite(bpm) && bpm > 0;
+                setBpmDraft({ text, bpm: valid ? bpm : settings.bpm });
+                if (valid) updateSettings({ ...settings, bpm });
+              }}
+              onBlur={() => setBpmDraft({ text: String(settings.bpm), bpm: settings.bpm })}
+              className="h-9 w-20 rounded-md border border-border bg-surface px-2 text-right tabular-nums disabled:opacity-50"
+            />
+            <span className="text-muted">bpm</span>
+          </label>
           <input
-            type="number"
-            min={20}
-            max={240}
-            value={settings.bpm}
+            type="range"
+            aria-label="Tempo"
+            min={TEMPO_SLIDER_MIN}
+            max={TEMPO_SLIDER_MAX}
+            step={1}
+            value={Math.max(TEMPO_SLIDER_MIN, Math.min(TEMPO_SLIDER_MAX, settings.bpm))}
             disabled={running}
-            onChange={(event) =>
-              updateSettings({
-                ...settings,
-                bpm: Math.max(
-                  20,
-                  Math.min(240, Number(event.target.value) || 20),
-                ),
-              })
-            }
-            className="h-9 w-20 rounded-md border border-border bg-surface px-2 text-right tabular-nums disabled:opacity-50"
+            onChange={(event) => updateSettings({ ...settings, bpm: Number(event.target.value) })}
+            className="w-28 accent-foreground disabled:opacity-50 sm:w-40"
           />
-          <span className="text-muted">bpm</span>
           {timeline ? (
             <span className="hidden text-xs text-muted sm:inline">
               {timeline.beatsPerMeasure}/{timeline.beatUnit}
               {timeline.scoreBpm ? ` · score says ${timeline.scoreBpm}` : ""}
             </span>
           ) : null}
-        </label>
+        </div>
 
         <button
           type="button"
@@ -188,16 +249,16 @@ export default function PracticeWorkspace() {
           <span className="text-muted">Timing ±</span>
           <input
             type="number"
-            min={30}
-            max={400}
+            min={0}
+            max={700}
             step={10}
             value={settings.timingToleranceMs}
             onChange={(event) =>
               updateSettings({
                 ...settings,
                 timingToleranceMs: Math.max(
-                  30,
-                  Math.min(400, Number(event.target.value) || 30),
+                  0,
+                  Math.min(700, Number(event.target.value) || 0),
                 ),
               })
             }
@@ -251,12 +312,7 @@ export default function PracticeWorkspace() {
           aria-label="Camera"
           className="min-h-0 overflow-hidden bg-[#141311] lg:border-r lg:border-border"
         >
-          <PlaceholderPanel
-            tone="dark"
-            title="Camera"
-            note="Your webcam preview will appear here, with posture and bow tracking drawn over it."
-            status="Not connected"
-          />
+          <PracticeCamera onPose={handlePose} onArticulation={handleArticulation} />
         </section>
 
         <section
@@ -499,6 +555,11 @@ function SummaryBar({
       label: "Musical Slurs",
       value: percent(summary.slurAccuracy),
       detail: summary.slurAccuracy === null ? "no slurs" : "",
+    },
+    {
+      label: "Articulation",
+      value: percent(summary.articulationAccuracy),
+      detail: summary.articulationAccuracy === null ? "no markings" : "",
     },
     {
       label: "Tempo",

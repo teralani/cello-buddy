@@ -36,6 +36,7 @@ function describe(note: ScoreNote, grade: NoteGrade) {
   if (note.dynamic) lines.push(`Marked ${note.dynamic}`);
   if (note.slurContinues) lines.push("Under a slur");
   if (note.slurStart) lines.push("Starts a slur");
+  if (note.articulation) lines.push(`Wants ${note.articulation}`);
   if (grade.status === "pending" || grade.status === "current" || grade.status === "skipped") return lines.join("\n");
   if (note.isRest) {
     lines.push(grade.pitch.ok ? "Rest kept" : "Played through the rest");
@@ -46,10 +47,25 @@ function describe(note: ScoreNote, grade: NoteGrade) {
       ? `Heard ${grade.pitch.playedName} (${grade.pitch.cents! >= 0 ? "+" : ""}${grade.pitch.cents!.toFixed(0)}¢)${grade.pitch.ok ? "" : " ✗"}`
       : "No pitch heard ✗",
   );
-  lines.push(grade.timing.deviationMs === null ? "No clear onset ✗" : `${grade.timing.deviationMs >= 0 ? "Late" : "Early"} ${Math.abs(grade.timing.deviationMs).toFixed(0)} ms${grade.timing.ok ? "" : " ✗"}`);
+  lines.push(
+    grade.timing.deviationMs === null
+      ? grade.timing.ok === null
+        ? "No clear onset (short note, not counted)"
+        : "No clear onset ✗"
+      : `${grade.timing.deviationMs >= 0 ? "Late" : "Early"} ${Math.abs(grade.timing.deviationMs).toFixed(0)} ms${grade.timing.ok ? "" : " ✗"}`,
+  );
   if (grade.dynamic.played) lines.push(`Played ${grade.dynamic.played}${grade.dynamic.ok === false ? ` (wanted ${grade.dynamic.expected}) ✗` : ""}`);
   if (grade.slur.expected && grade.slur.playedAttack !== null) {
     lines.push(grade.slur.ok ? (grade.slur.expected === "slurred" ? "Slurred" : "New bow") : grade.slur.expected === "slurred" ? "New bow where a slur was written ✗" : "Slurred into a note that wanted a new bow ✗");
+  }
+  if (grade.articulation.expected) {
+    lines.push(
+      grade.articulation.ok === true
+        ? `Style ${grade.articulation.played}`
+        : grade.articulation.ok === false
+          ? `Wanted ${grade.articulation.expected}, heard ${grade.articulation.played ?? "nothing"} ✗`
+          : "Style not measured",
+    );
   }
   return lines.join("\n");
 }

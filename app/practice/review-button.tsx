@@ -2,26 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { buttonClass } from "@/components/button";
-import { SCORE_NAME_KEY } from "@/components/upload-form";
-import { METRICS_KEY, sampleMetrics } from "@/lib/metrics";
+import { finishSession } from "@/lib/sessionHandoff";
 
-/* Sends the recorded session to the feedback chat. Until the recorder exists,
-   a sample metrics object is written if nothing has been recorded yet. */
+/* Opens the feedback chat. A session still running is ended first, so what
+   was played so far is graded and stored before the chat reads it. */
 export default function ReviewButton() {
   const router = useRouter();
 
   function handleClick() {
-    try {
-      if (!window.sessionStorage.getItem(METRICS_KEY)) {
-        const piece = window.sessionStorage.getItem(SCORE_NAME_KEY) ?? sampleMetrics.piece;
-        window.sessionStorage.setItem(
-          METRICS_KEY,
-          JSON.stringify({ ...sampleMetrics, piece, recordedAt: new Date().toISOString() }),
-        );
-      }
-    } catch {
-      /* Session storage may be unavailable. The feedback page handles missing data. */
-    }
+    finishSession();
     router.push("/feedback");
   }
 
