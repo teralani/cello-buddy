@@ -1,15 +1,12 @@
 "use client";
 
-import { startTransition, useEffect, useRef, useState } from "react";
-import { angleDelta, bowAngle, detectDualTapePoints, type DualTapePoints, type TapeColor } from "@/lib/bowVision";
+import { useEffect, useRef, useState } from "react";
 import type { PoseLandmark } from "@/lib/bowMotion";
 import { rmsOf } from "@/lib/audioPitch";
 
-/* The live camera window on the practice screen. Same pipeline as the model
-   test bench camera: the webcam feeds the pose worker, the microphone gates
-   stroke segmentation so the worker can classify each bow stroke, and two
-   coloured tape marks on the bow (frog and tip) give the bow angle. The
-   landmarks and the bow line are drawn on a canvas over the video. */
+/* The live camera window on the practice screen. The webcam feeds the pose
+  worker and the microphone gates stroke segmentation so the worker can
+  classify each bow stroke. */
 
 type CameraStatus = "starting" | "loading" | "live" | "blocked" | "error";
 
@@ -39,8 +36,7 @@ type Props = {
 const AUDIO_THRESHOLD = 0.0001;
 
 const poseConnections = [
-  [11, 13], [13, 15], [12, 14], [14, 16], [11, 12],
-  [23, 25], [25, 27], [24, 26], [26, 28], [23, 24],
+  [12, 14], [14, 16],
 ];
 const handConnections = [
   [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
@@ -48,14 +44,8 @@ const handConnections = [
   [13, 17], [17, 18], [18, 19], [19, 20], [0, 17],
 ];
 
-const POSE_COLOR = "#b4b8f0";
+const POSE_COLOR = "#fcae5b";
 const HAND_COLOR = "#f4c95d";
-
-const chipButton =
-  "inline-flex h-7 items-center rounded-md border border-white/15 px-2 text-xs text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent";
-
-const colorInput =
-  "h-7 w-9 cursor-pointer rounded-md border border-white/15 bg-transparent p-0.5";
 
 const statusLabel: Record<CameraStatus, string> = {
   starting: "Starting camera",
@@ -77,34 +67,18 @@ export default function PracticeCamera({ onPose, onArticulation }: Props) {
     onArticulationRef.current = onArticulation;
   }, [onArticulation]);
   const overlayRef = useRef<HTMLCanvasElement>(null);
-  const analysisRef = useRef<HTMLCanvasElement>(null);
   const resultRef = useRef<WorkerResult>({});
+  const previousResultRef = useRef<WorkerResult>({});
+  const smoothedPoseRef = useRef<PoseLandmark[] | undefined>(undefined);
+  const smoothedHandRef = useRef<Point[] | undefined>(undefined);
   const frameInFlightRef = useRef(false);
-  const tapePointsRef = useRef<DualTapePoints | null>(null);
-  const smoothedAngleRef = useRef<number | null>(null);
-  const missedTapeFramesRef = useRef(0);
 
   const [status, setStatus] = useState<CameraStatus>("starting");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [firstColor, setFirstColor] = useState<TapeColor>("#168dcc");
-  const [secondColor, setSecondColor] = useState<TapeColor>("#39ff14");
-  const [expectedLength, setExpectedLength] = useState<number | null>(null);
-  const [baselineAngle, setBaselineAngle] = useState<number | null>(null);
-  const [angle, setAngle] = useState<number | null>(null);
   const [bowX, setBowX] = useState<number | null>(null);
   const [articulation, setArticulation] = useState<Prediction>(null);
   const [strokeCount, setStrokeCount] = useState(0);
   const [audioActive, setAudioActive] = useState(false);
-
-  /* A new tape colour invalidates the tracked points and the smoothed angle. */
-  useEffect(() => {
-    tapePointsRef.current = null;
-    smoothedAngleRef.current = null;
-    missedTapeFramesRef.current = 0;
-    startTransition(() => {
-      setAngle(null);
-    });
-  }, [firstColor, secondColor]);
 
   /* Camera and microphone stream, the pose worker, and the audio gate. */
   useEffect(() => {
@@ -136,6 +110,7 @@ export default function PracticeCamera({ onPose, onArticulation }: Props) {
         if (data.timestamp !== undefined) onArticulationRef.current?.(data.timestamp, data.articulation);
       }
       if (data.poseLandmarks) {
+        previousResultRef.current = resultRef.current;
         resultRef.current = data;
         if (data.timestamp !== undefined && data.poseLandmarks.length > 0) {
           onPoseRef.current?.(data.timestamp, data.poseLandmarks, (video.videoWidth || 16) / (video.videoHeight || 9));
@@ -202,20 +177,16 @@ export default function PracticeCamera({ onPose, onArticulation }: Props) {
     };
   }, []);
 
-  /* Overlay drawing: skeleton, hand, and the tape-tracked bow line. Tape
-     detection runs on a small hidden canvas every 100 ms. */
+  /* Overlay drawing: right arm and hand skeleton. */
   useEffect(() => {
     const video = videoRef.current;
     const canvas = overlayRef.current;
-    const analysis = analysisRef.current;
-    if (!video || !canvas || !analysis) return;
+    if (!video || !canvas) return;
     const overlay = canvas.getContext("2d");
-    const context = analysis.getContext("2d", { willReadFrequently: true });
-    if (!overlay || !context) return;
+    if (!overlay) return;
 
     let active = true;
     let frame = 0;
-    let lastTapeCheck = 0;
     let lastUiUpdate = 0;
 
     const draw = () => {
@@ -225,98 +196,34 @@ export default function PracticeCamera({ onPose, onArticulation }: Props) {
       try {
         const width = video.videoWidth || 1280;
         const height = video.videoHeight || 720;
-        const analysisWidth = Math.min(320, width);
-        const analysisHeight = Math.round((analysisWidth / width) * height);
         if (canvas.width !== width || canvas.height !== height) {
           canvas.width = width;
           canvas.height = height;
         }
-        if (analysis.width !== analysisWidth || analysis.height !== analysisHeight) {
-          analysis.width = analysisWidth;
-          analysis.height = analysisHeight;
-        }
 
         overlay.clearRect(0, 0, width, height);
-        const result = resultRef.current;
+        const projected = projectResult(
+          resultRef.current,
+          previousResultRef.current,
+          performance.now(),
+        );
+        const result = smoothResult(projected, smoothedPoseRef, smoothedHandRef);
         overlay.strokeStyle = POSE_COLOR;
         overlay.lineWidth = Math.max(2, width / 500);
         for (const [from, to] of poseConnections)
           drawLine(overlay, result.poseLandmarks?.[from], result.poseLandmarks?.[to], width, height);
         for (const [from, to] of handConnections)
           drawLine(overlay, result.handLandmarks?.[from], result.handLandmarks?.[to], width, height);
-        drawPoints(overlay, result.poseLandmarks ?? [], width, height, POSE_COLOR);
+        drawPoints(overlay, rightArmPoints(result.poseLandmarks), width, height, POSE_COLOR);
         drawPoints(overlay, result.handLandmarks ?? [], width, height, HAND_COLOR);
 
         const now = performance.now();
-        if (now - lastTapeCheck > 100) {
-          lastTapeCheck = now;
-          context.drawImage(video, 0, 0, analysis.width, analysis.height);
-          const scaleX = analysis.width / width;
-          const scaleY = analysis.height / height;
-          const previous = tapePointsRef.current
-            ? {
-                first: { ...tapePointsRef.current.first, x: tapePointsRef.current.first.x * scaleX, y: tapePointsRef.current.first.y * scaleY },
-                second: { ...tapePointsRef.current.second, x: tapePointsRef.current.second.x * scaleX, y: tapePointsRef.current.second.y * scaleY },
-                length: tapePointsRef.current.length * scaleX,
-              }
-            : null;
-          const detectedInAnalysis = detectDualTapePoints(
-            context,
-            firstColor,
-            secondColor,
-            previous,
-            expectedLength ? expectedLength * scaleX : null,
-          );
-          if (detectedInAnalysis) {
-            const detected = {
-              first: { ...detectedInAnalysis.first, x: detectedInAnalysis.first.x / scaleX, y: detectedInAnalysis.first.y / scaleY },
-              second: { ...detectedInAnalysis.second, x: detectedInAnalysis.second.x / scaleX, y: detectedInAnalysis.second.y / scaleY },
-              length: detectedInAnalysis.length / scaleX,
-            };
-            missedTapeFramesRef.current = 0;
-            tapePointsRef.current = detected;
-            const rawAngle = bowAngle(detected.first, detected.second);
-            if (smoothedAngleRef.current === null) {
-              smoothedAngleRef.current = rawAngle;
-            } else {
-              let delta = rawAngle - smoothedAngleRef.current;
-              if (delta > 90) delta -= 180;
-              if (delta <= -90) delta += 180;
-              smoothedAngleRef.current += delta * 0.25;
-              if (smoothedAngleRef.current > 90) smoothedAngleRef.current -= 180;
-              if (smoothedAngleRef.current <= -90) smoothedAngleRef.current += 180;
-            }
-            setAngle(
-              baselineAngle === null
-                ? smoothedAngleRef.current
-                : angleDelta(smoothedAngleRef.current, baselineAngle),
-            );
-          } else {
-            missedTapeFramesRef.current += 1;
-            if (missedTapeFramesRef.current >= 24) {
-              tapePointsRef.current = null;
-              smoothedAngleRef.current = null;
-              setAngle(null);
-            }
-          }
-        }
 
         if (now - lastUiUpdate > 100) {
           lastUiUpdate = now;
           setBowX(result.bowHandX ?? null);
         }
 
-        const tape = tapePointsRef.current;
-        if (tape) {
-          overlay.strokeStyle = firstColor;
-          overlay.lineWidth = 5;
-          overlay.beginPath();
-          overlay.moveTo(tape.first.x, tape.first.y);
-          overlay.lineTo(tape.second.x, tape.second.y);
-          overlay.stroke();
-          drawPixelPoints(overlay, [tape.first], firstColor);
-          drawPixelPoints(overlay, [tape.second], secondColor);
-        }
       } catch {
         /* Keep the loop alive if a frame is unavailable during a resize or restart. */
       }
@@ -326,16 +233,7 @@ export default function PracticeCamera({ onPose, onArticulation }: Props) {
       active = false;
       cancelAnimationFrame(frame);
     };
-  }, [firstColor, secondColor, expectedLength, baselineAngle]);
-
-  /* Hold the bow straight across the strings, then click: that angle becomes
-     zero and the tape distance becomes the expected bow length. */
-  function calibrateStraightStroke() {
-    if (!tapePointsRef.current || smoothedAngleRef.current === null) return;
-    setExpectedLength(tapePointsRef.current.length);
-    setBaselineAngle(smoothedAngleRef.current);
-    setAngle(0);
-  }
+  }, []);
 
   const live = status === "live";
   const failed = status === "blocked" || status === "error";
@@ -353,8 +251,6 @@ export default function PracticeCamera({ onPose, onArticulation }: Props) {
           ref={overlayRef}
           className="pointer-events-none absolute inset-0 h-full w-full object-contain"
         />
-        <canvas ref={analysisRef} className="hidden" />
-
         <p className="absolute left-3 top-3 inline-flex items-center gap-2 rounded-md border border-white/15 bg-black/50 px-2.5 py-1 text-xs text-white/80 backdrop-blur-sm">
           <span
             aria-hidden
@@ -395,46 +291,12 @@ export default function PracticeCamera({ onPose, onArticulation }: Props) {
 
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-t border-white/10 px-3 py-2 text-xs">
         <Readout label="Bow hand X" value={bowX === null ? "–" : `${bowX.toFixed(3)} m`} />
-        <Readout label="Bow alignment" value={angle === null ? "–" : `${angle.toFixed(1)}°`} />
         <Readout label="Audio" value={audioActive ? "on" : "off"} />
         <Readout label="Strokes" value={String(strokeCount)} />
-
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-1.5 text-white/60">
-            Frog
-            <input
-              type="color"
-              value={firstColor}
-              onChange={(event) => setFirstColor(event.target.value)}
-              aria-label="Frog tape colour"
-              className={colorInput}
-            />
-          </label>
-          <label className="flex items-center gap-1.5 text-white/60">
-            Tip
-            <input
-              type="color"
-              value={secondColor}
-              onChange={(event) => setSecondColor(event.target.value)}
-              aria-label="Tip tape colour"
-              className={colorInput}
-            />
-          </label>
-          <button
-            type="button"
-            onClick={calibrateStraightStroke}
-            disabled={angle === null}
-            title="Hold the bow straight across the strings, then click"
-            className={chipButton}
-          >
-            Calibrate straight{baselineAngle !== null ? " ✓" : ""}
-          </button>
-        </div>
       </div>
     </div>
   );
 }
-
 function Readout({ label, value }: { label: string; value: string }) {
   return (
     <p className="flex items-baseline gap-1.5">
@@ -442,6 +304,62 @@ function Readout({ label, value }: { label: string; value: string }) {
       <span className="font-mono tabular-nums text-white">{value}</span>
     </p>
   );
+}
+
+/* Worker inference arrives behind the live video. Extrapolate only the
+   short, measurable gap from the previous two results; the cap prevents a
+   stale pose from drifting across the frame when inference is interrupted. */
+function projectResult(current: WorkerResult, previous: WorkerResult, now: number): WorkerResult {
+  const timestamp = current.timestamp;
+  if (timestamp === undefined || previous.timestamp === undefined || timestamp <= previous.timestamp) return current;
+  const elapsed = Math.min(80, Math.max(0, now - timestamp));
+  const interval = timestamp - previous.timestamp;
+  const factor = elapsed / interval;
+  return {
+    ...current,
+    poseLandmarks: projectPoints(current.poseLandmarks, previous.poseLandmarks, factor),
+    handLandmarks: projectPoints(current.handLandmarks, previous.handLandmarks, factor),
+  };
+}
+
+function projectPoints<T extends Point>(current: T[] | undefined, previous: T[] | undefined, factor: number): T[] | undefined {
+  if (!current || !previous || current.length !== previous.length) return current;
+  return current.map((point, index) => {
+    const before = previous[index];
+    return {
+      ...point,
+      x: point.x + (point.x - before.x) * factor,
+      y: point.y + (point.y - before.y) * factor,
+    } as T;
+  });
+}
+
+function smoothResult(
+  result: WorkerResult,
+  poseRef: { current: PoseLandmark[] | undefined },
+  handRef: { current: Point[] | undefined },
+): WorkerResult {
+  poseRef.current = smoothPoints(result.poseLandmarks, poseRef.current, 0.22);
+  handRef.current = smoothPoints(result.handLandmarks, handRef.current, 0.16);
+  return { ...result, poseLandmarks: poseRef.current, handLandmarks: handRef.current };
+}
+
+function smoothPoints<T extends Point>(current: T[] | undefined, previous: T[] | undefined, alpha: number): T[] | undefined {
+  if (!current) return previous;
+  if (!previous || previous.length !== current.length) return current;
+  return current.map((point, index) => {
+    const prior = previous[index];
+    return {
+      ...point,
+      x: prior.x + (point.x - prior.x) * alpha,
+      y: prior.y + (point.y - prior.y) * alpha,
+    } as T;
+  });
+}
+
+function rightArmPoints(points: PoseLandmark[] | undefined): PoseLandmark[] {
+  if (!points) return [];
+  return [points[12], points[14], points[16]].filter((point): point is PoseLandmark => point !== undefined);
 }
 
 /* Landmarks come normalised to 0..1, so scale them into canvas pixels. */
@@ -473,14 +391,4 @@ function drawLine(
   context.moveTo(first.x * width, first.y * height);
   context.lineTo(last.x * width, last.y * height);
   context.stroke();
-}
-
-/* Tape points are already in canvas pixels. */
-function drawPixelPoints(context: CanvasRenderingContext2D, points: Point[], fill: string) {
-  context.fillStyle = fill;
-  for (const point of points) {
-    context.beginPath();
-    context.arc(point.x, point.y, 10, 0, Math.PI * 2);
-    context.fill();
-  }
 }
