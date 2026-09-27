@@ -40,7 +40,7 @@ performers, sessions, and camera angles.
 ## 3. Collect articulation data
 
 ```powershell
-python model-training\collect_articulation.py --performer p01 --session s01 --hand-model models\hand_landmarker.task --out model-training\data\articulation.csv
+python model-training\collect_articulation.py --performer p01 --session s01 --pose-model models\pose_landmarker_lite.task --out model-training\data\articulation.csv
 ```
 
 You can choose the microphone without editing the script. On the listed laptop,
@@ -51,37 +51,38 @@ endpoint that may not support this callback-based collector:
 python model-training\collect_articulation.py --performer p01 --session s01 --hand-model public\models\hand_landmarker.task --device 9 --out model-training\data\articulation.csv
 ```
 
-The four articulation labels are:
+The three articulation labels are:
 
 - `1`: `legato`
 - `2`: `staccato`
-- `3`: `hooked`
-- `4`: `detache`
+- `3`: `detache`
 
-Press `N` when a note begins. You do not press a capture key: the collector
-uses the bow-hand wrist world-x movement and automatically closes a stroke when
-movement changes direction. The same behavior is used by the website's
-`BowStrokeSegmenter`. Collect examples in both directions: a downbow followed
-by an upbow creates one boundary, and the upbow followed by a downbow creates
-the next one. Repeat every articulation on both directions, across performers,
-sessions, and tempos.
+Select a label, then play repeated single notes. You do not press a capture key:
+the collector uses the right-wrist Pose world-x movement and automatically closes
+one example when movement changes direction. This avoids losing fast strokes to
+finger-level hand tracking. Collect each articulation in both
+directions, at two tempos, and on two strings. Start a new session when the
+camera position or recording conditions change.
 
-The collector also listens to the microphone and keeps only strokes with
-sustained sound. Silent bow placement and silent retakes are therefore excluded
-from the articulation dataset rather than being mislabeled as a bow style.
+The microphone is only a validity gate. A row is saved when enough frames during
+the movement contain sound, excluding silent bow placement and retakes. No audio
+feature is sent to the Random Forest, and silence before or after a stroke is not
+part of the feature vector.
 
-The local collector uses `N` for onset labels because it does not run the
-production microphone pipeline. In the website, Web Audio onset timestamps are
-merged automatically instead.
+The motion-only vector contains duration, speed, acceleration, peak-speed
+position, movement distance, and direction. Color tape and bow angle are outside
+this model. Existing articulation CSV files use an older schema; choose a new
+output file rather than appending to them.
 
 ## 4. Train and export
 
 Use at least two performer/session groups for meaningful leave-one-session-out
-validation:
+validation. Four sessions with 20-30 accepted strokes per label is a practical
+hackathon starting point:
 
 ```powershell
 python model-training\train_posture.py model-training\data\posture.csv --out lib\models\posture.generated.ts
-python model-training\train_articulation.py model-training\data\articulation.csv --out lib\models\articulation.generated.ts
+python model-training\train_articulation.py model-training\data\articulation-v2.csv --out lib\models\articulation.generated.ts
 ```
 
 Each trainer:

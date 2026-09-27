@@ -2,9 +2,10 @@
 
 import { startTransition, useEffect, useRef, useState } from "react";
 import { angleDelta, bowAngle, detectDualTapePoints, type DualTapePoints, type TapeColor } from "@/lib/bowVision";
-import { detectOnset, rmsOf } from "@/lib/audioPitch";
+import { rmsOf } from "@/lib/audioPitch";
 
 type Result = { poseLandmarks?: { x: number; y: number }[]; handLandmarks?: { x: number; y: number }[]; bowHandX?: number | null; type?: string; message?: string };
+const AUDIO_THRESHOLD = 0.0001;
 const poseConnections = [[11, 13], [13, 15], [12, 14], [14, 16], [11, 12], [23, 25], [25, 27], [24, 26], [26, 28], [23, 24]];
 const handConnections = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [5, 9], [9, 10], [10, 11], [11, 12], [9, 13], [13, 14], [14, 15], [15, 16], [13, 17], [17, 18], [18, 19], [19, 20], [0, 17]];
 
@@ -64,23 +65,16 @@ export default function ModelTestCamera() {
       analyser.smoothingTimeConstant = 0;
       audioContext.createMediaStreamSource(stream).connect(analyser);
       const audioBuffer = new Float32Array(analyser.fftSize);
-      let previousRms = 0;
-      let lastOnset = -Infinity;
       let lastInference = 0;
       const sendFrame = async (timestamp: number) => {
         if (!active || !video) return;
         analyser.getFloatTimeDomainData(audioBuffer);
         const currentRms = rmsOf(audioBuffer);
-        worker.postMessage({ type: "audio", active: currentRms >= 0.015 });
-        if (detectOnset(previousRms, currentRms, timestamp, lastOnset)) {
-          worker.postMessage({ type: "onset" });
-          lastOnset = timestamp;
-        }
-        previousRms = currentRms;
+        worker.postMessage({ type: "audio", active: currentRms >= AUDIO_THRESHOLD, timestamp });
         if (!frameInFlightRef.current && timestamp - lastInference >= 66 && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
           lastInference = timestamp;
           try {
-            const bitmap = await createImageBitmap(video, { resizeWidth: 256, resizeHeight: 256 });
+            const bitmap = await createImageBitmap(video, { resizeWidth: 384, resizeHeight: 216 });
             frameInFlightRef.current = true;
             worker.postMessage({ type: "frame", bitmap, timestamp }, [bitmap]);
           } catch {
