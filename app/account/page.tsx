@@ -22,7 +22,7 @@ export default function AccountPage() {
       <section className="mx-auto w-full max-w-xl px-6 pt-4 pb-20 sm:pt-12">
         <h1 className="text-3xl font-semibold leading-[1.1] tracking-tight sm:text-4xl">Account</h1>
         <p className="mt-4 text-base leading-relaxed text-muted">
-          Who you are signed in as, and how to change your password.
+          Your buddy keeps the numbers. You keep the password.
         </p>
 
         <div className="mt-10 flex flex-col gap-10">

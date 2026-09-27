@@ -189,7 +189,7 @@ export function Legend({ items }: { items: { color: string; label: string; line?
 /* Change against a named earlier period, e.g. "+6 pts vs last week". */
 export type StatDelta = { text: string; direction: "up" | "down" | "flat" };
 
-export function StatTile({ label, value, detail, delta }: { label: string; value: string; detail?: string; delta?: StatDelta }) {
+export function StatTile({ label, value, detail, delta, children }: { label: string; value: string; detail?: string; delta?: StatDelta; children?: ReactNode }) {
   const glyph = delta?.direction === "up" ? "▲" : delta?.direction === "down" ? "▼" : "–";
   return (
     <div className="rounded-md border border-border bg-surface px-3 py-2.5">
@@ -202,6 +202,7 @@ export function StatTile({ label, value, detail, delta }: { label: string; value
           {delta.text}
         </p>
       ) : null}
+      {children ? <div className="mt-2">{children}</div> : null}
     </div>
   );
 }

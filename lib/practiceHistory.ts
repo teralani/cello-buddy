@@ -73,6 +73,19 @@ const PIECES: SamplePiece[] = [
 type SampleRow = [number, number, number, number, number, number, number, number, number, number | null, number | null, number | null, number];
 
 const SAMPLE_ROWS: SampleRow[] = [
+  /* The first weeks: a few short, rough sessions with long gaps. */
+  [68, 20, 0, 9, 41, 44, 38, 236, 52, null, 45, null, 0.51],
+  [66, 19, 0, 12, 44, 41, 40, 228, 53, null, 48, null, 0.53],
+  [61, 20, 0, 16, 47, 39, 43, 221, 54, null, 50, null, 0.54],
+  [59, 18, 0, 14, 46, 40, 45, 214, 55, null, 52, null, 0.55],
+  [54, 19, 0, 22, 50, 37, 47, 209, 55, null, 54, null, 0.57],
+  [52, 18, 2, 11, 52, 35, 49, 201, 66, 40, 55, 42, 0.58],
+  [47, 20, 0, 41, 53, 34, 50, 198, 56, null, 57, null, 0.59],
+  [45, 18, 2, 32, 55, 33, 52, 194, 67, 44, 58, 46, 0.6],
+  [40, 19, 0, 41, 56, 32, 53, 190, 57, null, 59, null, 0.6],
+  [38, 18, 0, 30, 57, 32, 52, 188, 57, null, 60, null, 0.61],
+  [33, 19, 2, 32, 59, 30, 56, 181, 68, 49, 62, 51, 0.62],
+  [31, 18, 0, 41, 58, 31, 55, 184, 58, null, 61, null, 0.62],
   [27, 19, 0, 18, 58, 31, 54, 182, 58, null, 61, null, 0.62],
   [26, 18, 0, 41, 61, 29, 57, 171, 59, null, 64, null, 0.64],
   [24, 20, 2, 32, 66, 26, 63, 158, 68, 55, 70, 58, 0.66],
@@ -133,6 +146,13 @@ export function buildSampleHistory(now: Date): PracticeHistoryEntry[] {
 export function fetchPracticeHistory(now = new Date()): Promise<PracticeHistoryEntry[]> {
   const rows = buildSampleHistory(now).sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
   return Promise.resolve(rows);
+}
+
+/* ---------- Names ---------- */
+
+/* "Prelude from Suite No. 1 (Bach)" without the composer, for tight tiles. */
+export function briefPiece(piece: string): string {
+  return piece.replace(/\s*\([^)]*\)\s*$/, "").trim() || piece;
 }
 
 /* ---------- Aggregations the dashboard shows ---------- */
@@ -239,4 +259,102 @@ export function summarizePieces(history: PracticeHistoryEntry[]): PieceSummary[]
       };
     })
     .sort((a, b) => b.lastPlayedAt.localeCompare(a.lastPlayedAt));
+}
+
+/* Whole days since the entry finished, 0 for today. */
+export function daysSince(iso: string, now: Date): number {
+  return daysBetween(new Date(iso), now);
+}
+
+/* Longest run of consecutive practice days anywhere in the history. */
+export function longestStreak(history: PracticeHistoryEntry[], now: Date): number {
+  const played = [...new Set(history.map((entry) => daysSince(entry.recordedAt, now)))].sort((a, b) => a - b);
+  let best = 0;
+  let run = 0;
+  for (let i = 0; i < played.length; i += 1) {
+    run = i > 0 && played[i] === played[i - 1] + 1 ? run + 1 : 1;
+    best = Math.max(best, run);
+  }
+  return best;
+}
+
+export function totalNotes(history: PracticeHistoryEntry[]): number {
+  return history.reduce((sum, entry) => sum + entry.gradedNotes, 0);
+}
+
+/* Which of the last `days` days had a session, oldest first. */
+export function playedDays(history: PracticeHistoryEntry[], now: Date, days: number): { date: Date; played: boolean }[] {
+  return dailyTotals(history, now, days).map((day) => ({ date: day.date, played: day.sessions > 0 }));
+}
+
+/* A calendar of the last `weeks` weeks as columns of seven days, oldest
+   week first, each week running Monday to Sunday. Days after today, and any
+   before the grid's first Monday, are null so the grid stays rectangular. */
+export function weeklyCalendar(history: PracticeHistoryEntry[], now: Date, weeks: number): (DayTotal | null)[][] {
+  const today = startOfDay(now);
+  /* Days since the Monday of the current week (Monday = 0). */
+  const sinceMonday = (today.getDay() + 6) % 7;
+  const spanDays = (weeks - 1) * 7 + sinceMonday + 1;
+  const totals = dailyTotals(history, now, spanDays);
+  const columns: (DayTotal | null)[][] = [];
+  for (let w = 0; w < weeks; w += 1) {
+    columns.push(
+      Array.from({ length: 7 }, (_, d) => {
+        const index = w * 7 + d;
+        return index < totals.length ? totals[index] : null;
+      }),
+    );
+  }
+  return columns;
+}
+
+export type PersonalBest = {
+  label: string;
+  value: string;
+  /* What the number means, e.g. the piece it was set on. */
+  detail: string;
+  recordedAt: string;
+};
+
+/* The best single-session figures on record, each tied to the session that
+   set it, so the dashboard can say when a best is new. */
+export function personalBests(history: PracticeHistoryEntry[], now: Date): PersonalBest[] {
+  const bests: PersonalBest[] = [];
+  const pick = <T extends PracticeHistoryEntry>(key: (e: T) => number | null, higherIsBetter: boolean) => {
+    let best: T | null = null;
+    let bestValue = higherIsBetter ? -Infinity : Infinity;
+    for (const entry of history as T[]) {
+      const value = key(entry);
+      if (value === null) continue;
+      if (higherIsBetter ? value > bestValue : value < bestValue) {
+        best = entry;
+        bestValue = value;
+      }
+    }
+    return best;
+  };
+
+  const pitch = pick((e) => e.pitchAccuracyPct, true);
+  if (pitch) bests.push({ label: "Best pitch", value: `${Math.round(pitch.pitchAccuracyPct!)}%`, detail: briefPiece(pitch.piece), recordedAt: pitch.recordedAt });
+  const timing = pick((e) => e.timingAccuracyPct, true);
+  if (timing) bests.push({ label: "Best timing", value: `${Math.round(timing.timingAccuracyPct!)}%`, detail: briefPiece(timing.piece), recordedAt: timing.recordedAt });
+  const cents = pick((e) => e.meanAbsCents, false);
+  if (cents) bests.push({ label: "Closest to pitch", value: `${Math.round(cents.meanAbsCents!)}¢ off`, detail: briefPiece(cents.piece), recordedAt: cents.recordedAt });
+  const longest = pick((e) => e.durationSeconds, true);
+  if (longest) {
+    const m = Math.floor(longest.durationSeconds / 60);
+    const s = longest.durationSeconds % 60;
+    bests.push({ label: "Longest session", value: `${m}:${s.toString().padStart(2, "0")}`, detail: briefPiece(longest.piece), recordedAt: longest.recordedAt });
+  }
+  const streak = longestStreak(history, now);
+  if (streak > 0) {
+    const current = streakDays(history, now);
+    bests.push({
+      label: "Longest streak",
+      value: `${streak} ${streak === 1 ? "day" : "days"}`,
+      detail: current >= streak ? "That's the one you're on now" : `Current streak is ${current}`,
+      recordedAt: current >= streak ? now.toISOString() : "",
+    });
+  }
+  return bests;
 }
