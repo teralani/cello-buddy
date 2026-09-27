@@ -37,6 +37,9 @@ def get_db():
 db_dependency = Annotated[Session, Depends(get_db)]
 
 
+# Registered at both "/auth" and "/auth/": the Next.js server strips trailing
+# slashes with a redirect, so the frontend calls the slash-less form.
+@router.post("", status_code=status.HTTP_201_CREATED, include_in_schema=False)
 @router.post("/", status_code=status.HTTP_201_CREATED)
 def create_user(create_user_request: UsersBase, db: db_dependency):
     if db.query(Users).filter(Users.email == create_user_request.email).first():

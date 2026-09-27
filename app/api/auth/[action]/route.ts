@@ -2,13 +2,41 @@ import { cookies } from "next/headers";
 import { SESSION_COOKIE } from "@/lib/session";
 
 const SESSION_TTL_SECONDS = 20 * 60;
-const API_BASE_URL = (process.env.API_BASE_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
+const BACKEND_UNAVAILABLE = "The backend API is unavailable. Start it and try again.";
 
 type RequestBody = {
   email?: unknown;
   name?: unknown;
   password?: unknown;
 };
+
+/* Where the FastAPI backend lives. API_BASE_URL points at a separately hosted
+   backend. Without it the backend is reached through this app's own origin at
+   /api/py, which next.config.ts rewrites to a local uvicorn in development and
+   to the Python function built from api/main.py on Vercel. */
+function backendBaseUrl(request: Request): string {
+  const configured = process.env.API_BASE_URL?.trim();
+  if (configured) return configured.replace(/\/$/, "");
+
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0].trim();
+  const host = forwardedHost || request.headers.get("host") || new URL(request.url).host;
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0].trim();
+  const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])(:|$)/.test(host);
+  const proto = forwardedProto || (isLocal ? "http" : "https");
+  return `${proto}://${host}/api/py`;
+}
+
+/* Headers for the backend call. When the backend is this same deployment and
+   Vercel's deployment protection is on (preview URLs, for example), the bypass
+   secret lets the server-to-server call through. */
+function backendHeaders(contentType: string): HeadersInit {
+  const headers: Record<string, string> = { "Content-Type": contentType };
+  const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  if (bypass && !process.env.API_BASE_URL?.trim()) {
+    headers["x-vercel-protection-bypass"] = bypass;
+  }
+  return headers;
+}
 
 function getErrorMessage(payload: unknown, fallback: string): string {
   if (typeof payload !== "object" || payload === null) return fallback;
@@ -57,29 +85,39 @@ export async function POST(
     );
   }
 
+  const baseUrl = backendBaseUrl(request);
   let backendResponse: Response;
   try {
     if (action === "register") {
-      backendResponse = await fetch(`${API_BASE_URL}/auth/`, {
+      backendResponse = await fetch(`${baseUrl}/auth`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: backendHeaders("application/json"),
         body: JSON.stringify({ name, email, high_score: 0, password_hash: password }),
         cache: "no-store",
       });
     } else {
       const credentials = new URLSearchParams({ username: email, password });
-      backendResponse = await fetch(`${API_BASE_URL}/auth/token`, {
+      backendResponse = await fetch(`${baseUrl}/auth/token`, {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        headers: backendHeaders("application/x-www-form-urlencoded"),
         body: credentials,
         cache: "no-store",
       });
     }
-  } catch {
-    return Response.json(
-      { error: "The backend API is unavailable. Start it and try again." },
-      { status: 503 },
+  } catch (error) {
+    console.error(`auth/${action}: could not reach the backend at ${baseUrl}`, error);
+    return Response.json({ error: BACKEND_UNAVAILABLE }, { status: 503 });
+  }
+
+  /* FastAPI always answers in JSON, even for errors. Anything else means the
+     request never reached it: a 404 page from Next, a crashed function, or a
+     deployment protection screen. */
+  const contentType = backendResponse.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    console.error(
+      `auth/${action}: backend at ${baseUrl} answered ${backendResponse.status} with ${contentType || "no content type"}`,
     );
+    return Response.json({ error: BACKEND_UNAVAILABLE }, { status: 503 });
   }
 
   let payload: unknown;
