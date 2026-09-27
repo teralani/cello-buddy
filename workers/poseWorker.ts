@@ -6,6 +6,7 @@ import { postureModel } from "@/lib/models/posture.generated";
 
 type WorkerInput = { type: "configure" | "frame" | "audio"; bitmap?: ImageBitmap; timestamp?: number; active?: boolean };
 type ImageLandmark = { x: number; y: number; z: number; visibility?: number };
+type WorkerResult = { type: string; label?: string; probabilities?: Record<string, number>; articulation?: { label: string; probabilities: Record<string, number> } | null; articulationProbabilities?: Record<string, number>; poseLandmarks: ImageLandmark[]; handLandmarks: ImageLandmark[]; bowHandX: number | null };
 let pose: PoseLandmarker | undefined;
 let hand: HandLandmarker | undefined;
 const history: string[] = [];
@@ -29,41 +30,33 @@ self.onmessage = async ({ data }: MessageEvent<WorkerInput>) => {
     if (stroke) postMessage({ type: "articulation", articulation: articulationModel.predict(articulationFeatureVector(stroke)) });
     return;
   }
-  if (!pose || !hand || !data.bitmap || data.timestamp === undefined) {
+  if (!pose || !data.bitmap || data.timestamp === undefined) {
     data.bitmap?.close();
     return;
   }
   const poseResult = pose.detectForVideo(data.bitmap, data.timestamp);
-  const handResult = hand.detectForVideo(data.bitmap, data.timestamp);
   const landmarks = (poseResult.worldLandmarks[0] ?? []) as WorldLandmark[];
-  const handIndex = handResult.handedness.findIndex((categories) => categories[0]?.categoryName === "Right");
   const imagePoseLandmarks = (poseResult.landmarks[0] ?? []) as ImageLandmark[];
-  if (handIndex < 0) {
+  if (landmarks.length <= 16) {
     postMessage({ type: "landmarks", poseLandmarks: imagePoseLandmarks, handLandmarks: [], bowHandX: null });
     data.bitmap.close();
     return;
   }
-  const handLandmarks = (handResult.worldLandmarks[handIndex] ?? []) as WorldLandmark[];
-  const imageHandLandmarks = (handResult.landmarks[handIndex] ?? []) as ImageLandmark[];
+  const handResult = hand ? hand.detectForVideo(data.bitmap, data.timestamp) : null;
+  const handIndex = handResult?.handedness.findIndex((categories) => categories[0]?.categoryName === "Right") ?? -1;
+  const handLandmarks = handIndex >= 0 ? (handResult?.worldLandmarks[handIndex] ?? []) as WorldLandmark[] : [];
+  const imageHandLandmarks = handIndex >= 0 ? (handResult?.landmarks[handIndex] ?? []) as ImageLandmark[] : [];
   const bodyCenterX = landmarks[11] && landmarks[12] ? (landmarks[11].x + landmarks[12].x) / 2 : 0;
   const bowHandX = landmarks[16] ? landmarks[16].x - bodyCenterX : null;
-  if (landmarks.length < 17 || handLandmarks.length < 21) {
-    postMessage({ type: "landmarks", poseLandmarks: imagePoseLandmarks, handLandmarks: imageHandLandmarks, bowHandX });
-    data.bitmap.close();
-    return;
-  }
-  const features = computeFeatures(landmarks, handLandmarks);
-  const prediction = postureModel.predict(features);
-  if (!prediction) {
-    postMessage({ type: "model_unavailable", model: "posture", poseLandmarks: imagePoseLandmarks, handLandmarks: imageHandLandmarks, bowHandX });
-    data.bitmap.close();
-    return;
-  }
-  history.push(prediction.label); if (history.length > 10) history.shift();
-  const counts = history.reduce<Record<string, number>>((all, item) => ({ ...all, [item]: (all[item] ?? 0) + 1 }), {});
-  const smoothedLabel = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
-  const stroke = strokeSegmenter.push(handLandmarks[0].x, data.timestamp);
+  const stroke = strokeSegmenter.push(landmarks[16].x, data.timestamp);
   const articulation = stroke && articulationModel.predict(articulationFeatureVector(stroke));
-  postMessage({ type: "result", label: smoothedLabel, probabilities: prediction.probabilities, articulation: articulation?.label, articulationProbabilities: articulation?.probabilities, features, bowHandX, poseLandmarks: imagePoseLandmarks, handLandmarks: imageHandLandmarks });
+  const posturePrediction = handLandmarks.length >= 21 ? postureModel.predict(computeFeatures(landmarks, handLandmarks)) : null;
+  if (posturePrediction) {
+    history.push(posturePrediction.label); if (history.length > 10) history.shift();
+  }
+  const counts = history.reduce<Record<string, number>>((all, item) => ({ ...all, [item]: (all[item] ?? 0) + 1 }), {});
+  const smoothedLabel = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const result: WorkerResult = { type: "result", label: smoothedLabel, probabilities: posturePrediction?.probabilities, articulation: articulation ?? null, articulationProbabilities: articulation?.probabilities, poseLandmarks: imagePoseLandmarks, handLandmarks: imageHandLandmarks, bowHandX };
+  postMessage(result);
   data.bitmap.close();
 };

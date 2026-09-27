@@ -4,7 +4,8 @@ import { startTransition, useEffect, useRef, useState } from "react";
 import { angleDelta, bowAngle, detectDualTapePoints, type DualTapePoints, type TapeColor } from "@/lib/bowVision";
 import { rmsOf } from "@/lib/audioPitch";
 
-type Result = { poseLandmarks?: { x: number; y: number }[]; handLandmarks?: { x: number; y: number }[]; bowHandX?: number | null; type?: string; message?: string };
+type Prediction = { label: string; probabilities: Record<string, number> } | null;
+type Result = { poseLandmarks?: { x: number; y: number }[]; handLandmarks?: { x: number; y: number }[]; bowHandX?: number | null; articulation?: Prediction; type?: string; message?: string };
 const AUDIO_THRESHOLD = 0.0001;
 const poseConnections = [[11, 13], [13, 15], [12, 14], [14, 16], [11, 12], [23, 25], [25, 27], [24, 26], [26, 28], [23, 24]];
 const handConnections = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [5, 9], [9, 10], [10, 11], [11, 12], [9, 13], [13, 14], [14, 15], [15, 16], [13, 17], [17, 18], [18, 19], [19, 20], [0, 17]];
@@ -26,6 +27,9 @@ export default function ModelTestCamera() {
   const [baselineAngle, setBaselineAngle] = useState<number | null>(null);
   const [angle, setAngle] = useState<number | null>(null);
   const [bowX, setBowX] = useState<number | null>(null);
+  const [articulation, setArticulation] = useState<Prediction>(null);
+  const [strokeCount, setStrokeCount] = useState(0);
+  const [audioActive, setAudioActive] = useState(false);
 
   useEffect(() => {
     tapePointsRef.current = null;
@@ -48,6 +52,10 @@ export default function ModelTestCamera() {
       frameInFlightRef.current = false;
       if (data.type === "ready") setStatus("live");
       if (data.type === "error") setStatus(`MediaPipe error: ${data.message ?? "unknown"}`);
+      if (data.articulation) {
+        setArticulation(data.articulation);
+        setStrokeCount((count) => count + 1);
+      }
     };
     worker.postMessage({ type: "configure" });
     void navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }, audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }).then(async (stream) => {
@@ -70,7 +78,9 @@ export default function ModelTestCamera() {
         if (!active || !video) return;
         analyser.getFloatTimeDomainData(audioBuffer);
         const currentRms = rmsOf(audioBuffer);
-        worker.postMessage({ type: "audio", active: currentRms >= AUDIO_THRESHOLD, timestamp });
+        const currentAudioActive = currentRms >= AUDIO_THRESHOLD;
+        setAudioActive(currentAudioActive);
+        worker.postMessage({ type: "audio", active: currentAudioActive, timestamp });
         if (!frameInFlightRef.current && timestamp - lastInference >= 66 && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
           lastInference = timestamp;
           try {
@@ -201,6 +211,12 @@ export default function ModelTestCamera() {
         <div className="mt-4 grid gap-3 text-xs uppercase sm:grid-cols-3">
           <div><span className="text-ink-soft">Right bow hand X</span><strong className="mt-1 block font-display text-3xl text-butter">{bowX === null ? "--" : bowX.toFixed(3)} m</strong></div>
           <div><span className="text-ink-soft">Bow alignment</span><strong className="mt-1 block font-display text-3xl text-butter">{angle === null ? "--" : `${angle.toFixed(1)} deg`}</strong></div>
+          <div><span className="text-ink-soft">Audio gate / strokes</span><strong className="mt-1 block font-display text-3xl text-butter">{audioActive ? "ON" : "OFF"} / {strokeCount}</strong></div>
+        </div>
+        <div className="mt-4 border-t-2 border-screen-edge pt-4">
+          <span className="text-xs uppercase tracking-widest text-ink-soft">Detected articulation</span>
+          <strong className="mt-1 block font-display text-5xl uppercase text-butter">{articulation?.label ?? "Play a stroke"}</strong>
+          {articulation ? <div className="mt-2 flex flex-wrap gap-3 text-xs uppercase text-ink-soft">{Object.entries(articulation.probabilities).map(([label, probability]) => <span key={label}>{label}: {(probability * 100).toFixed(0)}%</span>)}</div> : null}
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2 border-t-2 border-screen-edge pt-4 text-xs uppercase">
           <label className="flex items-center gap-2">Frog <input type="color" value={firstColor} onChange={(event) => setFirstColor(event.target.value)} className="h-8 w-12 cursor-pointer border-2 border-screen-edge bg-screen p-0.5" /></label>
