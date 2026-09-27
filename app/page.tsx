@@ -1,9 +1,13 @@
+import SignOutButton from "@/components/sign-out-button";
 import UploadForm from "@/components/upload-form";
 
 export default function Home() {
   return (
     <main className="flex flex-1 flex-col">
-      <section className="mx-auto w-full max-w-xl px-6 pt-16 pb-20 sm:pt-28">
+      <header className="flex h-12 shrink-0 items-center justify-end px-4">
+        <SignOutButton />
+      </header>
+      <section className="mx-auto w-full max-w-xl px-6 pt-4 pb-20 sm:pt-16">
         <h1 className="text-4xl font-semibold leading-[1.1] tracking-tight sm:text-5xl">
           Cello Buddy
         </h1>

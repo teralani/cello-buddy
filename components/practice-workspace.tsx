@@ -6,6 +6,7 @@ import { buttonClass } from "@/components/button";
 import NoteStrip from "@/components/note-strip";
 import OpenSheetMusicDisplay from "@/components/open-sheet-music-display";
 import PlaceholderPanel from "@/components/placeholder-panel";
+import PracticeCamera from "@/components/practice-camera";
 import ScoreOverlay from "@/components/score-overlay";
 import TuningPanel from "@/components/tuning-panel";
 import { SCORE_MXL, SCORE_NAME_KEY } from "@/components/upload-form";
@@ -251,12 +252,7 @@ export default function PracticeWorkspace() {
           aria-label="Camera"
           className="min-h-0 overflow-hidden bg-[#141311] lg:border-r lg:border-border"
         >
-          <PlaceholderPanel
-            tone="dark"
-            title="Camera"
-            note="Your webcam preview will appear here, with posture and bow tracking drawn over it."
-            status="Not connected"
-          />
+          <PracticeCamera />
         </section>
 
         <section
