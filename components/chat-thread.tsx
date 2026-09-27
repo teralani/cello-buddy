@@ -11,7 +11,7 @@ import {
 } from "react";
 import { FIRST_PROMPT, type ChatEvent, type LessonSource } from "@/lib/chat";
 import { buttonClass } from "@/components/button";
-import { METRICS_KEY, type PracticeMetrics } from "@/lib/metrics";
+import { METRICS_KEY, isPracticeMetrics, type PracticeMetrics } from "@/lib/metrics";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -36,10 +36,13 @@ function getServerSnapshot(): undefined {
   return undefined;
 }
 
+/* Metrics written by an older build of the practice screen fail the shape
+   check and count as no session, so the chat never reviews stale data. */
 function parseMetrics(raw: string | null | undefined): PracticeMetrics | null {
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as PracticeMetrics;
+    const parsed: unknown = JSON.parse(raw);
+    return isPracticeMetrics(parsed) ? parsed : null;
   } catch {
     return null;
   }
@@ -212,25 +215,34 @@ function MessageText({
    priority order, padded with general questions when the playing was clean. */
 function suggestQuestions(metrics: PracticeMetrics): string[] {
   const s = metrics.summary;
+  /* Each score reaches 1 at the point the metric starts to matter. */
+  const missPct = (accuracyPct: number | null) =>
+    accuracyPct === null ? 0 : (100 - accuracyPct) / 30;
+  const tempoOff =
+    metrics.tempo.averagePlayed === null
+      ? 0
+      : Math.abs(metrics.tempo.averagePlayed - metrics.tempo.target) / 4;
   const ranked: { score: number; question: string }[] = [
     {
-      score: s.intonationMeanAbsCents / 8,
+      score: Math.max((s.meanAbsCents ?? 0) / 8, missPct(s.pitchAccuracyPct)),
       question: "How do I fix the notes that were sharp or flat?",
     },
     {
-      score: Math.max(s.contactPointDriftMm / 4, s.bowAngleVarianceDeg / 8),
-      question: "What should I do about my bow drifting?",
+      score: s.bow
+        ? Math.max(
+            (s.bow.pathAngleDeg ?? 0) / 20,
+            (1 - (s.bow.horizontalShare ?? 1)) / 0.25,
+          )
+        : 0,
+      question: "How do I keep my bow arm moving straight across?",
     },
     {
       score: Math.max(
-        Math.abs(metrics.tempo.averagePlayed - metrics.tempo.target) / 4,
-        s.timingMeanAbsMs / 25,
+        tempoOff,
+        (s.meanAbsTimingMs ?? 0) / 25,
+        missPct(s.timingAccuracyPct),
       ),
-      question: "How do I stop rushing the tempo?",
-    },
-    {
-      score: s.postureFlags.length > 0 ? 1.5 : 0,
-      question: "How do I fix my posture while I play?",
+      question: "How do I keep a steadier tempo?",
     },
   ];
   const picked = ranked

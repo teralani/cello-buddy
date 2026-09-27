@@ -1,112 +1,111 @@
 /* Shape of the metrics JSON a practice session produces.
-   The recorder writes one of these under METRICS_KEY in sessionStorage,
-   and the feedback page sends it to the chatbot. */
+   The practice screen writes one of these under METRICS_KEY in sessionStorage
+   when a play-through finishes, and the feedback page sends it to the chatbot.
+   Every number is measured from the session itself: pitch and timing come
+   from the microphone (lib/practiceEngine.ts), bow motion from the camera's
+   right wrist track (lib/bowMotion.ts). Nothing here is estimated or sampled;
+   a value that could not be measured is null. */
 
 export const METRICS_KEY = "cello-buddy:metrics";
 
-export type PostureFlag =
-  | "shoulder_elevated"
-  | "head_tilted"
-  | "wrist_collapsed"
-  | "elbow_low"
-  | "slouched";
+/* How the right wrist moved over a stretch of the piece, from the camera.
+   Distances are fractions of the camera frame's height. */
+export type BowMotionMetrics = {
+  /* Wrist positions the camera delivered in this window. */
+  samples: number;
+  /* Tilt of the wrist's main line of travel, in degrees. 0 is level bowing,
+     90 is straight up and down. null when the wrist barely moved. */
+  pathAngleDeg: number | null;
+  /* Share of the wrist's travel that was sideways, 0 to 1. null when the
+     wrist barely moved. */
+  horizontalShare: number | null;
+  /* Times the wrist changed sideways direction: the bow changes seen. */
+  reversals: number;
+  /* Sideways and vertical extent of the wrist's path, as a percentage of
+     the frame height. */
+  horizontalRangePct: number;
+  verticalRangePct: number;
+};
 
 export type MeasureMetrics = {
+  /* Printed measure number. */
   number: number;
+  /* Graded notes in the measure (rests excluded). */
   notes: number;
-  /* Signed mean pitch error in cents. Positive is sharp. */
-  intonationMeanCents: number;
-  /* Largest absolute pitch error in the measure, in cents. */
-  intonationMaxAbsCents: number;
-  /* Signed timing error against the score in ms. Positive is late, negative is rushed. */
-  timingDeviationMs: number;
-  /* Variance of the bow angle relative to perpendicular, in degrees squared. */
-  bowAngleVarianceDeg: number;
-  /* Signed drift of the contact point in mm. Positive is toward the fingerboard. */
-  contactPointDriftMm: number;
-  postureFlags: PostureFlag[];
+  /* Notes that start a new bow: every graded note not inside a slur. */
+  bowedNotes: number;
+  pitch: {
+    /* Percentage of notes within the pitch tolerance. */
+    accuracyPct: number | null;
+    /* Signed mean error in cents. Positive is sharp. */
+    meanCents: number | null;
+    meanAbsCents: number | null;
+    maxAbsCents: number | null;
+    /* Notes where no pitch could be heard. */
+    unheard: number;
+  };
+  timing: {
+    /* Percentage of notes whose onset landed within the timing tolerance. */
+    accuracyPct: number | null;
+    /* Signed mean onset error in ms. Negative is early (rushed). */
+    meanDeviationMs: number | null;
+    meanAbsDeviationMs: number | null;
+    /* Tempo actually played across this measure, from how its onsets were
+       spaced against the written beats. */
+    playedBpm: number | null;
+    /* Notes with no onset found near the written beat. */
+    unheard: number;
+  };
+  /* null when the camera did not see the right wrist during this measure. */
+  bow: BowMotionMetrics | null;
 };
 
 export type PracticeMetrics = {
   piece: string;
   recordedAt: string;
   durationSeconds: number;
+  /* false when the student stopped before the end. measures then lists only
+     what was played, out of measuresInPiece. */
+  completed: boolean;
+  measuresInPiece: number;
   tempo: {
     target: number;
-    averagePlayed: number;
+    /* Tempo played over the whole piece, or null with too few timed notes. */
+    averagePlayed: number | null;
   };
   summary: {
-    intonationMeanAbsCents: number;
-    timingMeanAbsMs: number;
-    bowAngleVarianceDeg: number;
-    contactPointDriftMm: number;
-    postureFlags: PostureFlag[];
+    gradedNotes: number;
+    pitchAccuracyPct: number | null;
+    meanAbsCents: number | null;
+    timingAccuracyPct: number | null;
+    meanAbsTimingMs: number | null;
+    /* Only graded where the score carries dynamics or slurs. */
+    dynamicAccuracyPct: number | null;
+    slurAccuracyPct: number | null;
+    /* Right wrist motion over the whole play-through. */
+    bow: BowMotionMetrics | null;
   };
   measures: MeasureMetrics[];
 };
 
-function measure(
-  number: number,
-  overrides: Partial<Omit<MeasureMetrics, "number">> = {},
-): MeasureMetrics {
-  return {
-    number,
-    notes: 4,
-    intonationMeanCents: 3,
-    intonationMaxAbsCents: 9,
-    timingDeviationMs: -8,
-    bowAngleVarianceDeg: 4,
-    contactPointDriftMm: 1,
-    postureFlags: [],
-    ...overrides,
-  };
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
-/* A realistic session with a few clear problems so the chatbot has something
-   concrete to say: sharp intonation in measures 5 to 8, bow drifting toward
-   the fingerboard in 9 to 12, a rushed tempo throughout, and a raised right
-   shoulder late in the piece. Used until the real recorder exists. */
-export const sampleMetrics: PracticeMetrics = {
-  piece: "Untitled score",
-  recordedAt: "2026-09-25T18:30:00.000Z",
-  durationSeconds: 58,
-  tempo: { target: 72, averagePlayed: 79 },
-  summary: {
-    intonationMeanAbsCents: 14,
-    timingMeanAbsMs: 31,
-    bowAngleVarianceDeg: 11,
-    contactPointDriftMm: 6,
-    postureFlags: ["shoulder_elevated"],
-  },
-  measures: [
-    measure(1),
-    measure(2),
-    measure(3, { timingDeviationMs: -18 }),
-    measure(4, { timingDeviationMs: -22 }),
-    measure(5, { intonationMeanCents: 22, intonationMaxAbsCents: 38, notes: 6 }),
-    measure(6, { intonationMeanCents: 27, intonationMaxAbsCents: 44, notes: 6 }),
-    measure(7, { intonationMeanCents: 19, intonationMaxAbsCents: 35, notes: 6 }),
-    measure(8, { intonationMeanCents: 24, intonationMaxAbsCents: 41, notes: 6 }),
-    measure(9, { bowAngleVarianceDeg: 18, contactPointDriftMm: 9 }),
-    measure(10, { bowAngleVarianceDeg: 24, contactPointDriftMm: 14 }),
-    measure(11, { bowAngleVarianceDeg: 27, contactPointDriftMm: 17 }),
-    measure(12, { bowAngleVarianceDeg: 21, contactPointDriftMm: 12 }),
-    measure(13, { timingDeviationMs: -40, postureFlags: ["shoulder_elevated"] }),
-    measure(14, { timingDeviationMs: -52, postureFlags: ["shoulder_elevated"] }),
-    measure(15, { timingDeviationMs: -47, postureFlags: ["shoulder_elevated"] }),
-    measure(16, { timingDeviationMs: -12, notes: 2 }),
-  ],
-};
-
 export function isPracticeMetrics(value: unknown): value is PracticeMetrics {
-  if (typeof value !== "object" || value === null) return false;
-  const v = value as Record<string, unknown>;
+  if (!isRecord(value)) return false;
   return (
-    typeof v.piece === "string" &&
-    typeof v.tempo === "object" &&
-    v.tempo !== null &&
-    typeof v.summary === "object" &&
-    v.summary !== null &&
-    Array.isArray(v.measures)
+    typeof value.piece === "string" &&
+    isRecord(value.tempo) &&
+    typeof value.tempo.target === "number" &&
+    isRecord(value.summary) &&
+    Array.isArray(value.measures) &&
+    value.measures.every(
+      (measure) =>
+        isRecord(measure) &&
+        typeof measure.number === "number" &&
+        isRecord(measure.pitch) &&
+        isRecord(measure.timing),
+    )
   );
 }

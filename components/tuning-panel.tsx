@@ -17,7 +17,8 @@ type NumericKey = {
 
 const sliders: { key: NumericKey; label: string; hint: string; min: number; max: number; step: number; unit: string }[] = [
   { key: "timingToleranceMs", label: "Rhythm wiggle room", hint: "How early or late a note may start and still count.", min: 30, max: 400, step: 10, unit: "ms" },
-  { key: "pitchToleranceCents", label: "Pitch tolerance", hint: "Distance from the written pitch that still counts as in tune.", min: 5, max: 80, step: 5, unit: "¢" },
+  { key: "pitchToleranceCents", label: "Pitch tolerance", hint: "Distance from the written pitch that still counts as in tune.", min: 5, max: 100, step: 5, unit: "¢" },
+  { key: "pitchClarity", label: "Pitch clarity floor", hint: "How periodic a frame must be to count as a pitch. Lower for bowed strings, higher for a clean voice.", min: 0.3, max: 0.95, step: 0.05, unit: "" },
   { key: "dynamicToleranceSteps", label: "Dynamic tolerance", hint: "Levels off the marking that still count (p vs mp is one level).", min: 0, max: 3, step: 1, unit: "levels" },
   { key: "dynamicStepDb", label: "Loudness per level", hint: "Decibels between neighbouring dynamics.", min: 3, max: 10, step: 1, unit: "dB" },
   { key: "mfReferenceDb", label: "mf reference level", hint: "Play a comfortable mf and set this near the live level shown below.", min: -60, max: -6, step: 1, unit: "dB" },
@@ -69,6 +70,10 @@ export default function TuningPanel({ settings, onChange, onClose, liveDb }: Pro
             onChange={(event) => onChange({ ...settings, countInMeasures: Math.max(1, Math.min(4, Number(event.target.value) || 1)) })}
             className="h-7 w-16 rounded-md border border-border bg-surface px-2 text-right tabular-nums"
           />
+        </label>
+        <label className="flex items-center justify-between text-xs font-medium">
+          Accept octave errors (grade the note name only)
+          <input type="checkbox" checked={settings.ignoreOctave} onChange={(event) => onChange({ ...settings, ignoreOctave: event.target.checked })} className="accent-foreground" />
         </label>
         <label className="flex items-center justify-between text-xs font-medium">
           Keep the click going while playing

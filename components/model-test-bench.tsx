@@ -5,6 +5,7 @@ import { BowStrokeSegmenter, type Stroke } from "@/lib/bowArticulation";
 import { articulationModel } from "@/lib/models/articulation.generated";
 import { postureModel } from "@/lib/models/posture.generated";
 import ModelTestCamera from "@/components/model-test-camera";
+import PitchMonitor from "@/components/pitch-monitor";
 
 const postureNames = ["elbow angle", "bow elevation", "wrist angle", "thumb angle", "index curl", "pinky curl"];
 const postureDefaults = [110, 25, 165, 145, 150, 135];
@@ -63,6 +64,10 @@ export default function ModelTestBench() {
 
       <div className="mt-6">
         <ModelTestCamera />
+      </div>
+
+      <div className="mt-6">
+        <PitchMonitor />
       </div>
 
       <section className="mt-6 border-t-4 border-screen-edge pt-5">

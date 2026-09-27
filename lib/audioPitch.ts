@@ -60,21 +60,31 @@ export function detectOnset(previousRms: number, currentRms: number, timestamp: 
 /* Normalized square difference (McLeod) pitch detection. More robust than
    plain autocorrelation on low cello strings, where the strong second
    harmonic often wins a raw correlation peak. Returns null when the frame
-   is too quiet or too noisy to be trusted. */
+   is too quiet or too noisy to be trusted.
+
+   Bowed strings are far less periodic than a voice (bow noise, a weak
+   fundamental on the C string, strong even harmonics), so the clarity
+   threshold defaults low and a stronger peak at double the period wins
+   over the first acceptable one. */
 export type PitchEstimate = { frequency: number; midi: number; clarity: number };
 
-export function detectPitchNsdf(
-  buffer: Float32Array,
-  sampleRate: number,
-  options: { minFrequency?: number; maxFrequency?: number; minClarity?: number } = {},
-): PitchEstimate | null {
+export type PitchOptions = { minFrequency?: number; maxFrequency?: number; minClarity?: number };
+
+export function detectPitchNsdf(input: Float32Array, sampleRate: number, options: PitchOptions = {}): PitchEstimate | null {
   const minFrequency = options.minFrequency ?? 55;
   const maxFrequency = options.maxFrequency ?? 1400;
-  const minClarity = options.minClarity ?? 0.85;
-  const size = buffer.length;
+  const minClarity = options.minClarity ?? 0.6;
+  const size = input.length;
   const minLag = Math.max(2, Math.floor(sampleRate / maxFrequency));
   const maxLag = Math.min(Math.floor(sampleRate / minFrequency), size - 2);
   if (maxLag <= minLag) return null;
+
+  /* Remove any DC offset; a biased signal inflates low-lag correlation. */
+  let mean = 0;
+  for (let index = 0; index < size; index += 1) mean += input[index];
+  mean /= size;
+  const buffer = new Float32Array(size);
+  for (let index = 0; index < size; index += 1) buffer[index] = input[index] - mean;
 
   const nsdf = new Float32Array(maxLag + 1);
   for (let lag = minLag; lag <= maxLag; lag += 1) {
@@ -110,8 +120,19 @@ export function detectPitchNsdf(
 
   const highest = Math.max(...peaks.map((peak) => nsdf[peak]));
   const threshold = highest * 0.9;
-  const chosen = peaks.find((peak) => nsdf[peak] >= threshold);
-  if (chosen === undefined) return null;
+  const first = peaks.find((peak) => nsdf[peak] >= threshold);
+  if (first === undefined) return null;
+  let chosen: number = first;
+
+  /* A dominant second harmonic can make the half-period peak pass the
+     threshold first. If the peak one octave down is clearly stronger, the
+     longer period is the real one. */
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const candidate = chosen;
+    const doubled = peaks.find((peak) => Math.abs(peak - 2 * candidate) <= Math.max(2, candidate * 0.03));
+    if (doubled === undefined || nsdf[doubled] <= nsdf[candidate] + 0.02) break;
+    chosen = doubled;
+  }
   const clarity = nsdf[chosen];
   if (clarity < minClarity) return null;
 
@@ -128,6 +149,25 @@ export function detectPitchNsdf(
   const frequency = sampleRate / refined;
   if (!Number.isFinite(frequency) || frequency < minFrequency || frequency > maxFrequency) return null;
   return { frequency, midi: 69 + 12 * Math.log2(frequency / 440), clarity };
+}
+
+/* Smooths frame-by-frame estimates for display: the median of the last few
+   frames, which ignores a single octave flip or a dropped frame. */
+export class PitchSmoother {
+  private readonly history: number[] = [];
+
+  constructor(private readonly length = 5) {}
+
+  push(midi: number | null): number | null {
+    if (midi === null) {
+      this.history.length = 0;
+      return null;
+    }
+    this.history.push(midi);
+    if (this.history.length > this.length) this.history.shift();
+    const sorted = [...this.history].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  }
 }
 
 export function rmsOf(buffer: Float32Array) {

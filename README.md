@@ -28,14 +28,15 @@ VOYAGE_API_KEY=pa-...
 The practice screen renders the score with OpenSheetMusicDisplay and grades a play-through against it.
 
 1. `lib/scoreTimeline.ts` walks the loaded score and produces one entry per sounding note: start and length in beats, pitch (MIDI), the dynamic marking in force, whether the note starts or sits under a slur, and staccato. Tied notes are merged into one.
-2. Press **Play**. The tempo box sets the beat; the score's own metronome marking is used the first time if it has one. A measure of clicks counts in (the count shows over the score), then the microphone starts.
-3. `lib/practiceEngine.ts` reads the mic on the AudioContext clock, detects pitch with a normalized autocorrelation (McLeod) and finds onsets two ways: a bow attack (level rises sharply after a dip or silence) and a plain pitch change (the left hand moving under a slur). Each note is graded once its window has passed:
-   - **Pitch**: median pitch over the sustained part of the note, within the cents tolerance.
+2. Press **Play**. The tempo box sets the beat; the score's own metronome marking is used the first time if it has one. One measure of clicks counts in, one per beat of the time signature, with the beat number shown over the score on each click. Then the microphone starts on the downbeat. The **Metronome** button keeps the click going through the piece, and **Timing ±** sets how far from the beat a note may start and still count.
+3. `lib/practiceEngine.ts` reads the mic on the AudioContext clock, detects pitch with a normalized autocorrelation (McLeod, tuned for bowed strings: a low clarity floor and a preference for the stronger peak an octave down when the second harmonic dominates) and finds onsets two ways: a bow attack (level rises sharply after a dip or silence) and a plain pitch change (the left hand moving under a slur). Each note is graded once its window has passed:
+   - **Pitch**: median pitch over the sustained part of the note, within the cents tolerance. By default only the note name is graded, so a detection octave slip on the low strings is not a wrong note.
    - **Rhythm**: nearest onset to the written start, within the timing tolerance.
    - **Dynamics**: the note's loud part mapped onto ppp..fff around a calibrated mf level, within the level tolerance.
    - **Slurs**: a note under a slur should show a pitch change without a bow attack; the first note of a slur should show an attack.
 4. A bar slides along the rendered score in time with the tempo (`components/score-overlay.tsx`, geometry in `lib/scoreGeometry.ts`), and each note on the score is painted as soon as it is graded: green for right, red for a pitch miss, amber for a rhythm, dynamic, or slur miss. The note strip above the score shows the same colors like a typing test. Hover a strip note for the details.
-5. **Tuning** opens the tolerances: rhythm wiggle room, pitch cents, dynamic levels, decibels per level, the mf reference level, bow attack sensitivity, silence floor, mic latency, count-in length, and whether the click keeps going. Settings are kept in `localStorage`.
+5. **Tuning** opens the tolerances: rhythm wiggle room, pitch cents, pitch clarity floor, octave tolerance, dynamic levels, decibels per level, the mf reference level, bow attack sensitivity, silence floor, mic latency, count-in length, and whether the click keeps going. Settings are kept in `localStorage`.
+6. The model test bench at `/model-test` has a live pitch readout (`components/pitch-monitor.tsx`) using the same detector, with a clarity slider, so you can check what the grader hears from your instrument before practicing.
 
 ## Feedback chatbot
 
